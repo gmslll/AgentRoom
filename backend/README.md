@@ -30,6 +30,10 @@ shared OpenAPI contract at `/openapi.yaml`. In production these are exposed as
 `https://try-status.online/api/docs` and
 `https://try-status.online/api/openapi.yaml`.
 
+Once a production host has been bootstrapped, deploy the committed `HEAD` with
+`./deploy/deploy.sh`. See [`docs/deployment.md`](docs/deployment.md) for
+prerequisites, overrides, backup behavior, and rollback guarantees.
+
 For persistent mode, create a database, set `DATABASE_URL`, apply migrations,
 and then start the service:
 
