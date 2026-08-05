@@ -4,7 +4,7 @@ import type {
   PendingAgentDelivery,
   RealtimeServerEvent,
   RoomMessage,
-} from "../modules/rooms/types.js";
+} from "../protocol/rooms.js";
 import type { AgentRoomBridgeConfig } from "./config.js";
 
 interface ApiErrorBody {

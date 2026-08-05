@@ -97,21 +97,27 @@ multi-instance deployments still need the planned shared Redis limiter.
 
 ```text
 src/
-├── app.ts                  # Fastify composition root
-├── server.ts               # Process lifecycle
-├── config.ts               # Environment parsing
-├── lib/                    # Shared backend utilities
+├── api/                    # Fastify composition, config, and process lifecycle
+├── connectors/             # Downloadable CLI and Claude/Codex adapters
+│   ├── claude/             # Claude Code Channel/MCP provider
+│   └── codex/              # Codex App Server provider and thread state
+├── database/               # Migration runner
+├── lib/                    # Small cross-module backend utilities
+├── protocol/               # Runtime DTOs shared by API modules and connectors
 ├── modules/
 │   ├── health/             # Liveness endpoint
 │   ├── auth/               # Accounts, passwords, and revocable sessions
 │   ├── rooms/              # Rooms, members, and messages
-│   └── realtime/           # Tickets and WebSocket fan-out
-└── bridge/
-    ├── cli.ts              # Join/configure a local agent
-    ├── claude-channel.ts   # Claude Code Channel/MCP adapter
-    └── codex-bridge.ts     # Codex App Server adapter
+│   ├── realtime/           # Tickets and WebSocket fan-out
+│   └── docs/               # Swagger and OpenAPI routes
+test/                       # Mirrors api/, connectors/, and modules/
 migrations/                 # Ordered PostgreSQL migrations
 ```
+
+Dependency direction is inward: `api/` composes modules, modules own business
+behavior and persistence ports, and `connectors/` acts as an external client of
+the public room protocol through `protocol/`. Modules never import `api/` or
+connector runtime code.
 
 The canonical external contracts live in `../shared/contracts/`.
 Frontend integration steps and request examples are documented in
@@ -126,7 +132,7 @@ copyable `npx @agentroom/bridge join ...` command. In a source checkout, build
 the backend and run the same CLI directly:
 
 ```bash
-node dist/bridge/cli.js join room_replace_me \
+node dist/connectors/cli.js join room_replace_me \
   --invite ari_replace_me \
   --provider codex \
   --name Codex \
@@ -138,7 +144,7 @@ mode-`0600` JSON file under the workspace's ignored `.agentroom/` directory.
 It never prints the member token. Start a saved bridge with:
 
 ```bash
-node dist/bridge/cli.js run --config /absolute/path/to/private-config.json
+node dist/connectors/cli.js run --config /absolute/path/to/private-config.json
 ```
 
 To bind an existing Claude or Codex conversation instead of creating a fresh
@@ -170,7 +176,7 @@ the project's `.mcp.json`:
   "mcpServers": {
     "agentroom": {
       "command": "node",
-      "args": ["/absolute/path/to/backend/dist/bridge/claude-channel.js"],
+      "args": ["/absolute/path/to/backend/dist/connectors/claude/channel.js"],
       "env": {
         "AGENTROOM_BASE_URL": "http://127.0.0.1:8787",
         "AGENTROOM_ROOM_ID": "room_replace_me",

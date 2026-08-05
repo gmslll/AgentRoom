@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { InMemoryAuthRepository } from "../src/modules/auth/memory-repository.js";
-import { AuthRateLimiter } from "../src/modules/auth/rate-limiter.js";
-import { AuthService } from "../src/modules/auth/service.js";
+import { InMemoryAuthRepository } from "../../../src/modules/auth/memory-repository.js";
+import { AuthRateLimiter } from "../../../src/modules/auth/rate-limiter.js";
+import { AuthService } from "../../../src/modules/auth/service.js";
 
 describe("AuthService", () => {
   it("rejects expired sessions", async () => {

@@ -29,8 +29,8 @@ AgentRoom/
 - Each application owns its dependencies, environment example, tests, and
   build configuration so it can be developed independently.
 
-The concrete frontend and backend stacks can be selected independently without
-changing this layout.
+Frontend and backend keep independent toolchains; inspect each application's
+manifest and README before running or changing it.
 
 ## AI coding tools
 

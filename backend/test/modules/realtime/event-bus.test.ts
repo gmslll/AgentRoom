@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { InMemoryEventBus } from "../src/modules/realtime/event-bus.js";
+import { InMemoryEventBus } from "../../../src/modules/realtime/event-bus.js";
 
 describe("InMemoryEventBus", () => {
   it("sends targeted delivery events only to the addressed member", () => {

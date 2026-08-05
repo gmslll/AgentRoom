@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { DeliveryWorker } from "../src/bridge/delivery-worker.js";
-import type { PendingAgentDelivery } from "../src/modules/rooms/types.js";
+import { DeliveryWorker } from "../../src/connectors/delivery-worker.js";
+import type { PendingAgentDelivery } from "../../src/protocol/rooms.js";
 
 function pending(status: PendingAgentDelivery["delivery"]["status"] = "queued") {
   return {

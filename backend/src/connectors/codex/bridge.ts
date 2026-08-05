@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-import { AgentRoomClient } from "./agentroom-client.js";
-import { loadCodexBridgeConfig } from "./config.js";
-import { CodexAppServerClient } from "./codex/app-server-client.js";
-import { CodexTaskRunner } from "./codex-runner.js";
-import { DeliveryWorker } from "./delivery-worker.js";
+import { AgentRoomClient } from "../agentroom-client.js";
+import { loadCodexBridgeConfig } from "../config.js";
+import { CodexAppServerClient } from "./app-server-client.js";
+import { CodexTaskRunner } from "./runner.js";
+import { DeliveryWorker } from "../delivery-worker.js";
 
 const config = loadCodexBridgeConfig();
 const client = new AgentRoomClient(config);

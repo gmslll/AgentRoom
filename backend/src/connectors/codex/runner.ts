@@ -1,7 +1,7 @@
-import type { PendingAgentDelivery } from "../modules/rooms/types.js";
-import type { AgentTaskRunner } from "./delivery-worker.js";
-import { CodexAppServerClient } from "./codex/app-server-client.js";
-import { loadCodexState, saveCodexState } from "./codex/state.js";
+import type { PendingAgentDelivery } from "../../protocol/rooms.js";
+import type { AgentTaskRunner } from "../delivery-worker.js";
+import { CodexAppServerClient } from "./app-server-client.js";
+import { loadCodexState, saveCodexState } from "./state.js";
 
 export class CodexTaskRunner implements AgentTaskRunner {
   #threadId: string | undefined;

@@ -49,6 +49,24 @@ Claude/Codex via MCP ──┘                         │
 Modules may call each other through explicit application interfaces. They must
 not reach into another module's database tables from route handlers.
 
+## Implementation layout
+
+```text
+src/
+├── api/          # Fastify composition, configuration, and process lifecycle
+├── modules/      # Vertical business modules and their persistence adapters
+├── connectors/   # Local AgentRoom CLI plus Claude and Codex providers
+├── database/     # Migration runner
+├── protocol/     # Runtime DTOs shared by server modules and connectors
+└── lib/          # Small cross-module primitives
+```
+
+Dependencies point toward business modules and protocol DTOs: `api/` wires
+modules together and `connectors/` consumes the public room protocol through
+`protocol/`. Business modules do not import API composition, process lifecycle
+code, or connector implementations. Tests mirror these boundaries under
+`test/` so ownership remains obvious to humans and coding agents.
+
 ## Persistence and scale
 
 - PostgreSQL is the source of truth for rooms, members, messages, attachments,

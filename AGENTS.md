@@ -36,8 +36,8 @@ connect terminals or agents to it by room ID.
 
 - Read the nearest `AGENTS.md` before changing a subtree.
 - Treat existing user changes as intentional and avoid unrelated rewrites.
-- Do not invent setup, lint, or test commands. Inspect the relevant manifest or
-  README first; the technology stacks have not been selected yet.
+- Do not invent setup, lint, or test commands. Inspect the relevant application
+  manifest and README first; frontend and backend own independent toolchains.
 - Keep public protocol behavior documented and versionable.
 - Add or update tests with behavioral changes once a test setup exists.
 - Report which application and contract surfaces changed when handing work off.

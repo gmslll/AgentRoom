@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { buildApp } from "../src/app.js";
-import { InMemoryRoomRepository } from "../src/modules/rooms/memory-repository.js";
+import { buildApp } from "../../src/api/app.js";
+import { InMemoryRoomRepository } from "../../src/modules/rooms/memory-repository.js";
 
 const apps: Awaited<ReturnType<typeof buildApp>>[] = [];
 

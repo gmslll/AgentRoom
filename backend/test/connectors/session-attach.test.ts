@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseCodexThreadList } from "../src/bridge/codex/app-server-client.js";
+import { parseCodexThreadList } from "../../src/connectors/codex/app-server-client.js";
 import {
   assertCodexThreadAttachable,
   claudeMcpAddArgs,
@@ -9,7 +9,7 @@ import {
   commandLine,
   formatCodexThread,
   resolveCodexThread,
-} from "../src/bridge/session-attach.js";
+} from "../../src/connectors/session-attach.js";
 
 const threads = [
   {

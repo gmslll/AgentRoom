@@ -201,9 +201,9 @@ async function runBridge(args: string[]): Promise<void> {
     }
 
     if (config.provider === "claude") {
-      await import("./claude-channel.js");
+      await import("./claude/channel.js");
     } else {
-      await import("./codex-bridge.js");
+      await import("./codex/bridge.js");
     }
   } finally {
     await releaseLock();

@@ -5,9 +5,9 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import type { PendingAgentDelivery } from "../modules/rooms/types.js";
-import { AgentRoomClient } from "./agentroom-client.js";
-import { loadAgentRoomBridgeConfig } from "./config.js";
+import type { PendingAgentDelivery } from "../../protocol/rooms.js";
+import { AgentRoomClient } from "../agentroom-client.js";
+import { loadAgentRoomBridgeConfig } from "../config.js";
 
 const config = loadAgentRoomBridgeConfig();
 const client = new AgentRoomClient(config);

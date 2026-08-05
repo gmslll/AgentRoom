@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { loadConfig, normalizePublicBaseUrl } from "../src/config.js";
+import { loadConfig, normalizePublicBaseUrl } from "../../src/api/config.js";
 
 describe("backend configuration", () => {
   it("derives the default public URL from the listening port", () => {

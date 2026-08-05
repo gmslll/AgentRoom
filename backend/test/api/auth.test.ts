@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { buildApp } from "../src/app.js";
+import { buildApp } from "../../src/api/app.js";
 
 const apps: Awaited<ReturnType<typeof buildApp>>[] = [];
 

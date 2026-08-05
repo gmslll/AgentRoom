@@ -1,6 +1,6 @@
 import { Pool } from "pg";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { buildApp } from "../src/app.js";
+import { buildApp } from "../../../src/api/app.js";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const describeWithPostgres = databaseUrl ? describe : describe.skip;

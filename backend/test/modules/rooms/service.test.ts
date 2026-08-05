@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { AppError } from "../src/lib/errors.js";
-import { InMemoryEventBus } from "../src/modules/realtime/event-bus.js";
-import { InMemoryRoomRepository } from "../src/modules/rooms/memory-repository.js";
-import { RoomService } from "../src/modules/rooms/service.js";
+import { AppError } from "../../../src/lib/errors.js";
+import { InMemoryEventBus } from "../../../src/modules/realtime/event-bus.js";
+import { InMemoryRoomRepository } from "../../../src/modules/rooms/memory-repository.js";
+import { RoomService } from "../../../src/modules/rooms/service.js";
 
 async function setupRoom() {
   const service = new RoomService(

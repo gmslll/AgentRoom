@@ -2,11 +2,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AgentRoomClient } from "../src/bridge/agentroom-client.js";
-import { CodexTaskRunner } from "../src/bridge/codex-runner.js";
-import { CodexAppServerClient } from "../src/bridge/codex/app-server-client.js";
-import { saveCodexState } from "../src/bridge/codex/state.js";
-import type { PendingAgentDelivery } from "../src/modules/rooms/types.js";
+import { AgentRoomClient } from "../../src/connectors/agentroom-client.js";
+import { CodexAppServerClient } from "../../src/connectors/codex/app-server-client.js";
+import { CodexTaskRunner } from "../../src/connectors/codex/runner.js";
+import { saveCodexState } from "../../src/connectors/codex/state.js";
+import type { PendingAgentDelivery } from "../../src/protocol/rooms.js";
 
 const temporaryDirectories: string[] = [];
 

@@ -231,7 +231,7 @@ if [[ -e "$release_dir" ]]; then
     echo "Existing release marker does not match its directory" >&2
     exit 1
   }
-  [[ -f "$release_dir/backend/dist/server.js" ]] || {
+  [[ -f "$release_dir/backend/dist/api/server.js" ]] || {
     echo "Existing release has no compiled server" >&2
     exit 1
   }
@@ -265,7 +265,7 @@ sudo -u agentroom /usr/local/bin/npm --prefix "$staging_dir/backend" ci
 sudo -u agentroom /usr/local/bin/npm --prefix "$staging_dir/backend" run build
 sudo -u agentroom /usr/local/bin/npm --prefix "$staging_dir/backend" prune --omit=dev
 
-[[ -f "$staging_dir/backend/dist/server.js" ]]
+[[ -f "$staging_dir/backend/dist/api/server.js" ]]
 [[ -f "$staging_dir/backend/dist/database/migrate.js" ]]
 [[ -f "$staging_dir/backend/dist/modules/docs/routes.js" ]]
 [[ -f "$staging_dir/shared/contracts/http/openapi.yaml" ]]

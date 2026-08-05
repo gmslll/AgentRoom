@@ -1,4 +1,4 @@
-import type { PendingAgentDelivery } from "../modules/rooms/types.js";
+import type { PendingAgentDelivery } from "../protocol/rooms.js";
 
 export interface DeliveryApi {
   updateDelivery(
