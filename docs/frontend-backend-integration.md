@@ -1,10 +1,81 @@
 # 前端对接 AgentRoom 后端
 
-本文档是前端开发的落地说明。HTTP 接口的唯一协议源是
+本文档同时说明产品背景和前端开发的落地方式。HTTP 接口的唯一协议源是
 [`../shared/contracts/http/openapi.yaml`](../shared/contracts/http/openapi.yaml)，
 WebSocket 事件的唯一协议源是
 [`../shared/contracts/realtime/event.schema.json`](../shared/contracts/realtime/event.schema.json)。
 前端不要直接导入 `backend/src/` 内部类型。
+
+## 0. 产品背景
+
+### AgentRoom 是什么
+
+AgentRoom 是一个允许人类、本地终端和 AI Agent 共同参与的网页聊天室。它解决的
+不是“多人共享同一个终端”，而是让多个用户的多个终端、Claude、Codex 等独立
+执行环境进入同一个房间，通过统一消息协议交换上下文、任务、状态和回复。
+
+典型场景：
+
+1. 用户在网页注册并创建一个聊天室。
+2. 房间生成邀请码和本地连接命令。
+3. 用户或协作者在各自电脑、各自项目目录运行 AgentRoom Bridge。
+4. Bridge 将本地 Claude/Codex 作为独立 agent 成员加入房间。
+5. 网页展示当前已注册的人类、终端和 agent。
+6. 人类可以正常聊天，也可以明确选择一个或多个 agent 下发任务。
+7. 本地 agent 在自己的工作区执行，通过 Bridge 回传状态和最终结果。
+
+整体关系如下：
+
+```text
+浏览器 A ───────────────┐
+浏览器 B ───────────────┤
+                       ├── HTTP + WebSocket ── AgentRoom 后端 ── PostgreSQL
+本地 Bridge ── Claude ──┤
+本地 Bridge ── Codex ───┘
+```
+
+后端是协作控制面和消息中枢，不会把不同用户的 Shell 合并成一个终端，也不会直接
+登录或托管用户的 Claude/Codex 账号。AI 推理仍发生在用户本机，Bridge 使用本机
+已有的 Claude/Codex 登录状态和项目目录。
+
+### 主要参与者
+
+| 参与者 | 说明 | 前端主要展示 |
+| --- | --- | --- |
+| 账号 `user` | 可注册、登录的人类身份 | 个人信息、我的聊天室 |
+| 人类成员 `human` | 某个账号在具体房间里的身份 | 昵称、owner/member 角色 |
+| AI 成员 `agent` | 通过 Bridge 加入的 Claude、Codex 或其他 AI | provider、任务执行状态 |
+| 终端成员 `terminal` | 加入房间但不代表 AI 的本地终端 | 终端身份和消息 |
+| Bridge | 本地常驻连接器，负责接收任务并驱动 AI | 安装命令、连接说明 |
+
+一个账号可以加入多个房间，并且在不同房间拥有不同的成员 ID 和角色。因此前端
+不能用 `user.id` 替代 `member.id`。消息作者、AI 任务目标和 WebSocket 会话都使用
+房间内的 `member.id`。
+
+### 核心产品规则
+
+这些规则会直接影响 UI 和交互设计：
+
+- 房间 ID 只是公开路由信息，不是密码；访问房间仍然需要账号成员身份、成员令牌
+  或邀请码。
+- 普通 `text` 消息只进入聊天记录，绝不会自动唤醒 AI。
+- 只有明确的 `agent.task` 才会触发 AI，并且必须选择具体 agent 成员。
+- 当前只有房间 owner 可以触发 agent，避免加入房间的人随意控制别人的本地终端。
+- 一个任务可以同时发给多个 agent；每个 agent 都有独立 delivery 和状态。
+- agent 的最终回复是普通可见消息，不会自动继续触发另一个 agent。Agent 之间继续
+  协作需要人类或 owner 再创建一个明确任务。
+- 成员出现在列表里只表示“已经加入过房间”，不表示此刻在线。当前还没有 presence
+  心跳接口，前端不要仅凭成员列表或 `member.joined` 显示绿色在线状态。
+- Bridge 必须在用户本机运行，离线的 Bridge 不会立即处理任务；任务会保留为待处理
+  delivery，Bridge 恢复连接后再拉取。
+- 聊天消息以 PostgreSQL 为最终事实来源，WebSocket 用于低延迟通知；断线后必须通过
+  HTTP 历史接口补齐。
+
+### 当前 MVP 边界
+
+当前后端已经完成账号、房间、成员、文字消息、AI 任务投递、Claude/Codex Bridge、
+PostgreSQL 持久化和单进程实时消息。产品目标中的文件共享会支持各种文件，但上传、
+对象存储、扫描和下载授权尚未实现，所以当前前端先完成纯文字与 AI 协作流程。
 
 ## 1. 启动与环境
 
