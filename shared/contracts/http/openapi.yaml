@@ -1,0 +1,624 @@
+openapi: 3.1.0
+info:
+  title: AgentRoom HTTP API
+  version: 0.4.0
+  description: Control and command API for AgentRoom clients and bridges.
+servers:
+  - url: http://127.0.0.1:8787
+    description: Local development
+tags:
+  - name: system
+  - name: auth
+  - name: rooms
+  - name: messages
+  - name: deliveries
+  - name: realtime
+paths:
+  /health:
+    get:
+      tags: [system]
+      operationId: getHealth
+      responses:
+        "200":
+          description: Service is healthy.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, service, time]
+                properties:
+                  status: { const: ok }
+                  service: { const: agentroom-backend }
+                  time: { type: string, format: date-time }
+        "503":
+          description: A required dependency or database migration is unavailable.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, service, time]
+                properties:
+                  status: { const: unavailable }
+                  service: { const: agentroom-backend }
+                  time: { type: string, format: date-time }
+  /v1/auth/register:
+    post:
+      tags: [auth]
+      operationId: registerAccount
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [email, displayName, password]
+              properties:
+                email: { type: string, minLength: 3, maxLength: 254, pattern: "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$" }
+                displayName: { type: string, minLength: 1, maxLength: 64, pattern: "\\S" }
+                password: { type: string, minLength: 8, maxLength: 128, writeOnly: true }
+      responses:
+        "201":
+          description: Account and its first revocable session were created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountAccess" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /v1/auth/login:
+    post:
+      tags: [auth]
+      operationId: loginAccount
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [email, password]
+              properties:
+                email: { type: string, minLength: 3, maxLength: 254, pattern: "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$" }
+                password: { type: string, minLength: 8, maxLength: 128, writeOnly: true }
+      responses:
+        "200":
+          description: A new revocable account session was issued.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountAccess" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /v1/auth/me:
+    get:
+      tags: [auth]
+      operationId: getCurrentAccount
+      security: [{ BearerAuth: [] }]
+      responses:
+        "200":
+          description: Current account session identity.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user]
+                properties:
+                  user: { $ref: "#/components/schemas/Account" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/auth/logout:
+    post:
+      tags: [auth]
+      operationId: logoutAccount
+      security: [{ BearerAuth: [] }]
+      responses:
+        "204":
+          description: The current account session was revoked.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/rooms:
+    get:
+      tags: [rooms]
+      operationId: listAccountRooms
+      security: [{ BearerAuth: [] }]
+      responses:
+        "200":
+          description: Rooms linked to the authenticated account.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/AccountRoomMembership" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [rooms]
+      operationId: createRoom
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                name: { type: string, minLength: 1, maxLength: 100, pattern: "\\S" }
+                displayName:
+                  type: string
+                  minLength: 1
+                  maxLength: 64
+                  pattern: "\\S"
+                  description: Required for guest creation; defaults to the authenticated account display name.
+      responses:
+        "201":
+          description: Room and its owner membership were created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CreatedRoomAccess" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/rooms/{roomId}/members:
+    parameters:
+      - $ref: "#/components/parameters/RoomId"
+    get:
+      tags: [rooms]
+      operationId: listRoomMembers
+      security: [{ BearerAuth: [] }]
+      responses:
+        "200":
+          description: Members currently registered in the room.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Member" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [rooms]
+      operationId: joinRoom
+      description: An account bearer token is optional for human joins and links the new membership to that account.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [inviteCode, displayName, actorType]
+              properties:
+                inviteCode: { type: string, minLength: 8, maxLength: 100 }
+                displayName: { type: string, minLength: 1, maxLength: 64, pattern: "\\S" }
+                actorType: { $ref: "#/components/schemas/ActorType" }
+                agentProvider:
+                  type: string
+                  enum: [claude, codex, other]
+              allOf:
+                - if:
+                    properties: { actorType: { const: agent } }
+                  then:
+                    required: [agentProvider]
+                - if:
+                    properties:
+                      actorType: { enum: [human, terminal] }
+                  then:
+                    not: { required: [agentProvider] }
+      responses:
+        "201":
+          description: A room membership and access token were created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RoomAccess" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/rooms/{roomId}/invite-code/rotate:
+    parameters:
+      - $ref: "#/components/parameters/RoomId"
+    post:
+      tags: [rooms]
+      operationId: rotateRoomInviteCode
+      security: [{ BearerAuth: [] }]
+      responses:
+        "200":
+          description: The previous invite was invalidated and a new one issued.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [inviteCode, connectorCommand]
+                properties:
+                  inviteCode:
+                    type: string
+                    readOnly: true
+                  connectorCommand: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/rooms/{roomId}/messages:
+    parameters:
+      - $ref: "#/components/parameters/RoomId"
+    get:
+      tags: [messages]
+      operationId: listMessages
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - in: query
+          name: afterSequence
+          schema: { type: integer, minimum: 0, default: 0 }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        "200":
+          description: Messages ordered by ascending room sequence.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextAfterSequence]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Message" }
+                  nextAfterSequence: { type: integer, minimum: 0 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [messages]
+      operationId: sendMessage
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: "#/components/schemas/TextMessageInput"
+                - $ref: "#/components/schemas/AgentTaskInput"
+      responses:
+        "200":
+          description: An idempotent agent task already existed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SendMessageResult" }
+        "201":
+          description: Message was durably accepted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SendMessageResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/rooms/{roomId}/deliveries/pending:
+    parameters:
+      - $ref: "#/components/parameters/RoomId"
+    get:
+      tags: [deliveries]
+      operationId: listPendingAgentDeliveries
+      security: [{ BearerAuth: [] }]
+      responses:
+        "200":
+          description: Non-terminal deliveries addressed to the authenticated agent.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/PendingAgentDelivery" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/rooms/{roomId}/deliveries/{deliveryId}/status:
+    parameters:
+      - $ref: "#/components/parameters/RoomId"
+      - $ref: "#/components/parameters/DeliveryId"
+    post:
+      tags: [deliveries]
+      operationId: updateAgentDeliveryStatus
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  additionalProperties: false
+                  required: [status]
+                  properties: { status: { const: received } }
+                - type: object
+                  additionalProperties: false
+                  required: [status]
+                  properties: { status: { const: running } }
+                - type: object
+                  additionalProperties: false
+                  required: [status, error]
+                  properties:
+                    status: { const: failed }
+                    error: { type: string, minLength: 1, maxLength: 2000, pattern: "\\S" }
+      responses:
+        "200":
+          description: Delivery state was updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [delivery]
+                properties:
+                  delivery: { $ref: "#/components/schemas/AgentDelivery" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/rooms/{roomId}/deliveries/{deliveryId}/reply:
+    parameters:
+      - $ref: "#/components/parameters/RoomId"
+      - $ref: "#/components/parameters/DeliveryId"
+    post:
+      tags: [deliveries]
+      operationId: replyToAgentDelivery
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [text]
+              properties:
+                text: { type: string, minLength: 1, maxLength: 8000, pattern: "\\S" }
+      responses:
+        "201":
+          description: Agent reply was posted and the delivery completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [delivery, message]
+                properties:
+                  delivery: { $ref: "#/components/schemas/AgentDelivery" }
+                  message: { $ref: "#/components/schemas/Message" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/rooms/{roomId}/realtime-tickets:
+    parameters:
+      - $ref: "#/components/parameters/RoomId"
+    post:
+      tags: [realtime]
+      operationId: createRealtimeTicket
+      security: [{ BearerAuth: [] }]
+      responses:
+        "201":
+          description: A short-lived, single-use WebSocket ticket.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ticket, expiresAt]
+                properties:
+                  ticket: { type: string }
+                  expiresAt: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: Account session (`ars_`) or room-scoped member (`art_`) token, as allowed by the operation.
+  parameters:
+    RoomId:
+      in: path
+      name: roomId
+      required: true
+      schema: { type: string, minLength: 8, maxLength: 80 }
+    DeliveryId:
+      in: path
+      name: deliveryId
+      required: true
+      schema: { type: string, minLength: 8, maxLength: 80 }
+  schemas:
+    Account:
+      type: object
+      required: [id, email, displayName, createdAt]
+      properties:
+        id: { type: string }
+        email: { type: string }
+        displayName: { type: string }
+        createdAt: { type: string, format: date-time }
+    AccountAccess:
+      type: object
+      required: [user, accessToken, expiresAt]
+      properties:
+        user: { $ref: "#/components/schemas/Account" }
+        accessToken:
+          type: string
+          readOnly: true
+          description: Raw revocable account session token. The server reveals it only when issued.
+        expiresAt: { type: string, format: date-time }
+    ActorType:
+      type: string
+      enum: [human, agent, terminal]
+    AgentProvider:
+      type: [string, "null"]
+      enum: [claude, codex, other, null]
+    Room:
+      type: object
+      required: [id, name, createdAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        createdAt: { type: string, format: date-time }
+    Member:
+      type: object
+      required: [id, roomId, displayName, actorType, agentProvider, role, joinedAt]
+      properties:
+        id: { type: string }
+        roomId: { type: string }
+        displayName: { type: string }
+        actorType: { $ref: "#/components/schemas/ActorType" }
+        agentProvider: { $ref: "#/components/schemas/AgentProvider" }
+        role: { type: string, enum: [owner, member] }
+        joinedAt: { type: string, format: date-time }
+    AccountRoomMembership:
+      type: object
+      required: [room, member]
+      properties:
+        room: { $ref: "#/components/schemas/Room" }
+        member: { $ref: "#/components/schemas/Member" }
+    MessageAuthor:
+      type: object
+      required: [memberId, displayName, actorType, agentProvider]
+      properties:
+        memberId: { type: string }
+        displayName: { type: string }
+        actorType: { $ref: "#/components/schemas/ActorType" }
+        agentProvider: { $ref: "#/components/schemas/AgentProvider" }
+    Message:
+      type: object
+      required:
+        [id, roomId, sequence, kind, text, attachmentIds, targetMemberIds,
+         inReplyToMessageId, idempotencyKey, author, createdAt]
+      properties:
+        id: { type: string }
+        roomId: { type: string }
+        sequence: { type: integer, minimum: 1 }
+        kind: { type: string, enum: [text, agent.task, agent.reply] }
+        text: { type: string }
+        attachmentIds:
+          type: array
+          items: { type: string }
+        targetMemberIds:
+          type: array
+          items: { type: string }
+        inReplyToMessageId: { type: [string, "null"] }
+        idempotencyKey: { type: [string, "null"] }
+        author: { $ref: "#/components/schemas/MessageAuthor" }
+        createdAt: { type: string, format: date-time }
+    TextMessageInput:
+      type: object
+      additionalProperties: false
+      required: [kind, text]
+      properties:
+        kind: { const: text }
+        text: { type: string, minLength: 1, maxLength: 8000, pattern: "\\S" }
+    AgentTaskInput:
+      type: object
+      additionalProperties: false
+      required: [kind, text, targetMemberIds, idempotencyKey]
+      properties:
+        kind: { const: agent.task }
+        text: { type: string, minLength: 1, maxLength: 8000, pattern: "\\S" }
+        targetMemberIds:
+          type: array
+          minItems: 1
+          maxItems: 10
+          items: { type: string, minLength: 8, maxLength: 80 }
+        idempotencyKey: { type: string, minLength: 8, maxLength: 100 }
+    SendMessageResult:
+      type: object
+      required: [message, deliveries]
+      properties:
+        message: { $ref: "#/components/schemas/Message" }
+        deliveries:
+          type: array
+          items: { $ref: "#/components/schemas/AgentDelivery" }
+    DeliveryStatus:
+      type: string
+      enum: [queued, received, running, replied, failed]
+    AgentDelivery:
+      type: object
+      required:
+        [id, roomId, taskMessageId, targetMemberId, status, error, createdAt,
+         updatedAt]
+      properties:
+        id: { type: string }
+        roomId: { type: string }
+        taskMessageId: { type: string }
+        targetMemberId: { type: string }
+        status: { $ref: "#/components/schemas/DeliveryStatus" }
+        error: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    PendingAgentDelivery:
+      type: object
+      required: [delivery, task]
+      properties:
+        delivery: { $ref: "#/components/schemas/AgentDelivery" }
+        task: { $ref: "#/components/schemas/Message" }
+    RoomAccess:
+      type: object
+      required: [room, member, accessToken]
+      properties:
+        room: { $ref: "#/components/schemas/Room" }
+        member: { $ref: "#/components/schemas/Member" }
+        accessToken:
+          type: string
+          readOnly: true
+          description: Raw member token. The server reveals it only when issued.
+    CreatedRoomAccess:
+      allOf:
+        - $ref: "#/components/schemas/RoomAccess"
+        - type: object
+          required: [inviteCode, connectorCommand]
+          properties:
+            inviteCode:
+              type: string
+              readOnly: true
+              description: Raw room invite capability.
+            connectorCommand: { type: string }
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, requestId]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            requestId: { type: string }
+  responses:
+    BadRequest:
+      description: Request validation failed.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: Account or room-member authentication failed.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Forbidden:
+      description: The supplied invite or capability is not allowed.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: The room or resource does not exist.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Conflict:
+      description: The requested state transition conflicts with current state.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    TooManyRequests:
+      description: Too many authentication attempts from this client.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }

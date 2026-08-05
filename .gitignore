@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+!.env.*.example
 CLAUDE.local.md
 
 # JavaScript / TypeScript
@@ -29,6 +30,8 @@ target/
 
 # Logs and local data
 *.log
+*.tgz
 tmp/
 data/
 uploads/
+.agentroom/

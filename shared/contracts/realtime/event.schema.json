@@ -1,0 +1,261 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentroom.local/contracts/realtime/event.schema.json",
+  "title": "AgentRoom realtime server event",
+  "oneOf": [
+    { "$ref": "#/$defs/sessionReady" },
+    { "$ref": "#/$defs/memberJoined" },
+    { "$ref": "#/$defs/messageCreated" },
+    { "$ref": "#/$defs/deliveryQueued" },
+    { "$ref": "#/$defs/deliveryUpdated" }
+  ],
+  "$defs": {
+    "actorType": {
+      "type": "string",
+      "enum": ["human", "agent", "terminal"]
+    },
+    "agentProvider": {
+      "type": ["string", "null"],
+      "enum": ["claude", "codex", "other", null]
+    },
+    "member": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "roomId",
+        "displayName",
+        "actorType",
+        "agentProvider",
+        "role",
+        "joinedAt"
+      ],
+      "properties": {
+        "id": { "type": "string" },
+        "roomId": { "type": "string" },
+        "displayName": { "type": "string" },
+        "actorType": { "$ref": "#/$defs/actorType" },
+        "agentProvider": { "$ref": "#/$defs/agentProvider" },
+        "role": { "type": "string", "enum": ["owner", "member"] },
+        "joinedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "author": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["memberId", "displayName", "actorType", "agentProvider"],
+      "properties": {
+        "memberId": { "type": "string" },
+        "displayName": { "type": "string" },
+        "actorType": { "$ref": "#/$defs/actorType" },
+        "agentProvider": { "$ref": "#/$defs/agentProvider" }
+      }
+    },
+    "message": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "roomId",
+        "sequence",
+        "kind",
+        "text",
+        "attachmentIds",
+        "targetMemberIds",
+        "inReplyToMessageId",
+        "idempotencyKey",
+        "author",
+        "createdAt"
+      ],
+      "properties": {
+        "id": { "type": "string" },
+        "roomId": { "type": "string" },
+        "sequence": { "type": "integer", "minimum": 1 },
+        "kind": {
+          "type": "string",
+          "enum": ["text", "agent.task", "agent.reply"]
+        },
+        "text": { "type": "string" },
+        "attachmentIds": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "targetMemberIds": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "inReplyToMessageId": { "type": ["string", "null"] },
+        "idempotencyKey": { "type": ["string", "null"] },
+        "author": { "$ref": "#/$defs/author" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "delivery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "roomId",
+        "taskMessageId",
+        "targetMemberId",
+        "status",
+        "error",
+        "createdAt",
+        "updatedAt"
+      ],
+      "properties": {
+        "id": { "type": "string" },
+        "roomId": { "type": "string" },
+        "taskMessageId": { "type": "string" },
+        "targetMemberId": { "type": "string" },
+        "status": {
+          "type": "string",
+          "enum": ["queued", "received", "running", "replied", "failed"]
+        },
+        "error": { "type": ["string", "null"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "baseEvent": {
+      "type": "object",
+      "required": ["version", "eventId", "type", "roomId", "occurredAt"],
+      "properties": {
+        "version": { "const": 1 },
+        "eventId": { "type": "string" },
+        "type": { "type": "string" },
+        "roomId": { "type": "string" },
+        "occurredAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "sessionReady": {
+      "allOf": [
+        { "$ref": "#/$defs/baseEvent" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["version", "eventId", "type", "roomId", "occurredAt", "data"],
+          "properties": {
+            "version": { "const": 1 },
+            "eventId": { "type": "string" },
+            "type": { "const": "session.ready" },
+            "roomId": { "type": "string" },
+            "occurredAt": { "type": "string", "format": "date-time" },
+            "data": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["member"],
+              "properties": { "member": { "$ref": "#/$defs/member" } }
+            }
+          }
+        }
+      ]
+    },
+    "memberJoined": {
+      "allOf": [
+        { "$ref": "#/$defs/baseEvent" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["version", "eventId", "type", "roomId", "occurredAt", "data"],
+          "properties": {
+            "version": { "const": 1 },
+            "eventId": { "type": "string" },
+            "type": { "const": "member.joined" },
+            "roomId": { "type": "string" },
+            "occurredAt": { "type": "string", "format": "date-time" },
+            "data": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["member"],
+              "properties": { "member": { "$ref": "#/$defs/member" } }
+            }
+          }
+        }
+      ]
+    },
+    "messageCreated": {
+      "allOf": [
+        { "$ref": "#/$defs/baseEvent" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "version",
+            "eventId",
+            "type",
+            "roomId",
+            "sequence",
+            "occurredAt",
+            "data"
+          ],
+          "properties": {
+            "version": { "const": 1 },
+            "eventId": { "type": "string" },
+            "type": { "const": "message.created" },
+            "roomId": { "type": "string" },
+            "sequence": { "type": "integer", "minimum": 1 },
+            "occurredAt": { "type": "string", "format": "date-time" },
+            "data": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["message"],
+              "properties": { "message": { "$ref": "#/$defs/message" } }
+            }
+          }
+        }
+      ]
+    },
+    "deliveryQueued": {
+      "allOf": [
+        { "$ref": "#/$defs/baseEvent" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["version", "eventId", "type", "roomId", "occurredAt", "data"],
+          "properties": {
+            "version": { "const": 1 },
+            "eventId": { "type": "string" },
+            "type": { "const": "delivery.queued" },
+            "roomId": { "type": "string" },
+            "occurredAt": { "type": "string", "format": "date-time" },
+            "data": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["delivery", "task"],
+              "properties": {
+                "delivery": { "$ref": "#/$defs/delivery" },
+                "task": { "$ref": "#/$defs/message" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "deliveryUpdated": {
+      "allOf": [
+        { "$ref": "#/$defs/baseEvent" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["version", "eventId", "type", "roomId", "occurredAt", "data"],
+          "properties": {
+            "version": { "const": 1 },
+            "eventId": { "type": "string" },
+            "type": { "const": "delivery.updated" },
+            "roomId": { "type": "string" },
+            "occurredAt": { "type": "string", "format": "date-time" },
+            "data": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["delivery"],
+              "properties": {
+                "delivery": { "$ref": "#/$defs/delivery" }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

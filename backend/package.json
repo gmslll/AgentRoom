@@ -1,0 +1,55 @@
+{
+  "name": "@agentroom/bridge",
+  "version": "0.1.0",
+  "description": "Local Claude Code and Codex bridges for AgentRoom",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gmslll/AgentRoom.git",
+    "directory": "backend"
+  },
+  "type": "module",
+  "files": [
+    "dist/bridge",
+    "README.md",
+    "bridge.env.example"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "agentroom": "dist/bridge/cli.js",
+    "agentroom-claude-channel": "dist/bridge/claude-channel.js",
+    "agentroom-codex-bridge": "dist/bridge/codex-bridge.js"
+  },
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js",
+    "db:migrate": "tsx src/database/migrate.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "bridge:claude": "tsx src/bridge/claude-channel.ts",
+    "bridge:codex": "tsx src/bridge/codex-bridge.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.3.0",
+    "@fastify/websocket": "^11.3.0",
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "@sinclair/typebox": "^0.34.52",
+    "fastify": "^5.11.2",
+    "pg": "^8.22.0",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "@types/pg": "^8.20.4",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.23.6",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}
