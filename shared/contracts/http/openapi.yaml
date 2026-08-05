@@ -4,6 +4,8 @@ info:
   version: 0.5.0
   description: Control and command API for AgentRoom clients and bridges.
 servers:
+  - url: https://try-status.online/api
+    description: Production
   - url: http://127.0.0.1:8787
     description: Local development
 tags:

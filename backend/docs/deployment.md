@@ -7,8 +7,8 @@ TLS/WebSockets in Nginx.
 ## Topology
 
 ```text
-Internet -> Nginx :443 -> AgentRoom :18787 -> PostgreSQL :15432
-                                      systemd       Docker + named volume
+Internet -> Nginx :443 /api/* -> AgentRoom :18787 -> PostgreSQL :15432
+                 / (frontend)            systemd       Docker + named volume
 ```
 
 Only Nginx is public. Bind both the API and database to loopback. Configure:
@@ -18,7 +18,7 @@ HOST=127.0.0.1
 PORT=18787
 LOG_LEVEL=info
 CORS_ORIGIN=https://try-status.online
-PUBLIC_BASE_URL=https://try-status.online
+PUBLIC_BASE_URL=https://try-status.online/api
 DATABASE_URL=postgresql://agentroom:replace_me@127.0.0.1:15432/agentroom
 AUTH_SESSION_TTL_DAYS=30
 ```
@@ -46,7 +46,9 @@ database backup until the new health check and WebSocket handshake pass.
 
 Install the checked-in unit and Nginx configuration from `backend/deploy/`, run
 `systemctl daemon-reload`, validate with `nginx -t`, and reload rather than
-restarting Nginx.
+restarting Nginx. The production Nginx rule strips the external `/api/` prefix
+before proxying to the backend, whose internal routes remain `/health` and
+`/v1/*`. The root path is reserved for the frontend.
 
 ## Verification
 
@@ -55,7 +57,7 @@ Verify all layers after deployment:
 ```bash
 systemctl is-active agentroom
 curl --fail http://127.0.0.1:18787/health
-curl --fail https://try-status.online/health
+curl --fail https://try-status.online/api/health
 journalctl -u agentroom --since "10 minutes ago"
 ```
 

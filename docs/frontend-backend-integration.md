@@ -95,6 +95,17 @@ npm run dev
 CORS_ORIGIN=http://localhost:3000
 ```
 
+线上后端统一通过以下基址访问，根域名 `/` 留给前端页面：
+
+```dotenv
+VITE_API_BASE_URL=https://try-status.online/api
+```
+
+因此健康检查为 `GET https://try-status.online/api/health`，其他接口例如注册为
+`POST https://try-status.online/api/v1/auth/register`，WebSocket 为
+`wss://try-status.online/api/v1/realtime`。前端不要直接请求线上根路径下的
+`/health` 或 `/v1/*`。
+
 使用 PostgreSQL 时先配置 `DATABASE_URL`，再执行：
 
 ```bash
@@ -103,8 +114,8 @@ npm run dev
 ```
 
 没有配置 PostgreSQL 时数据只保存在内存中，后端重启后账号和聊天室都会丢失。
-前端可以通过 `GET /health` 判断服务是否可用；数据库未迁移或不可用时返回
-`503`。
+前端可以通过相对于 API 基址的 `GET /health` 判断服务是否可用；数据库未迁移或
+不可用时返回 `503`。
 
 前端项目可以自行配置类似 `VITE_API_BASE_URL` 或
 `NEXT_PUBLIC_API_BASE_URL` 的变量，不要在代码里散落固定地址。
@@ -132,7 +143,11 @@ Authorization: Bearer ars_xxx
 建议封装一个统一客户端：
 
 ```ts
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL.replace(/\/+$/, "");
+
+function apiUrl(path: string): string {
+  return `${API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
+}
 
 export class ApiError extends Error {
   constructor(
@@ -154,7 +169,7 @@ export async function api<T>(
   if (init.body) headers.set("content-type", "application/json");
   if (accessToken) headers.set("authorization", `Bearer ${accessToken}`);
 
-  const response = await fetch(new URL(path, API_BASE_URL), {
+  const response = await fetch(apiUrl(path), {
     ...init,
     headers,
   });
@@ -329,9 +344,9 @@ Authorization: Bearer ars_xxx
 
 ```json
 {
-  "connectorCommand": "npx --yes @agentroom/bridge join room_xxx --base-url \"https://api.example.com\"",
+  "connectorCommand": "npx --yes @agentroom/bridge join room_xxx --base-url \"https://try-status.online/api\"",
   "connector": {
-    "command": "npx --yes @agentroom/bridge join room_xxx --base-url \"https://api.example.com\"",
+    "command": "npx --yes @agentroom/bridge join room_xxx --base-url \"https://try-status.online/api\"",
     "packageName": "@agentroom/bridge",
     "nodeVersion": ">=22",
     "supportedProviders": ["claude", "codex"]
@@ -457,7 +472,7 @@ Authorization: Bearer ars_xxx
 然后连接：
 
 ```text
-ws://127.0.0.1:8787/v1/realtime?ticket=arrt_xxx
+wss://try-status.online/api/v1/realtime?ticket=arrt_xxx
 ```
 
 前端示例：
@@ -470,7 +485,7 @@ async function connectRoomRealtime(roomId: string, accountToken: string) {
     accountToken,
   );
 
-  const url = new URL("/v1/realtime", API_BASE_URL);
+  const url = new URL(apiUrl("/v1/realtime"));
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   url.searchParams.set("ticket", ticket);
   return new WebSocket(url);

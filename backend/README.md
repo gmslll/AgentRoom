@@ -41,7 +41,8 @@ Account sessions expire after 30 days by default. Set
 `AUTH_SESSION_TTL_DAYS` to an integer from 1 to 365 to change that window.
 Set `PUBLIC_BASE_URL` to the externally reachable backend origin (and optional
 path prefix). Room connector responses embed this value in copyable CLI
-commands; do not set it to a private container-only address in production.
+commands; do not set it to a private container-only address in production. For
+the current deployment, use `https://try-status.online/api`.
 
 ```bash
 npm test
