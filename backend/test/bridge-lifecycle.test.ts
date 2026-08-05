@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentRoomClient } from "../src/bridge/agentroom-client.js";
 import { CodexTaskRunner } from "../src/bridge/codex-runner.js";
 import { CodexAppServerClient } from "../src/bridge/codex/app-server-client.js";
+import { saveCodexState } from "../src/bridge/codex/state.js";
 import type { PendingAgentDelivery } from "../src/modules/rooms/types.js";
 
 const temporaryDirectories: string[] = [];
@@ -74,6 +75,33 @@ describe("bridge lifecycle", () => {
     expect(appServer.startOrResumeThread).toHaveBeenNthCalledWith(1, undefined);
     expect(appServer.startOrResumeThread).toHaveBeenNthCalledWith(2, "thread_1");
     expect(appServer.runTurn).toHaveBeenCalledTimes(2);
+  });
+
+  it("never falls back to a new thread for an attached Codex session", async () => {
+    const stateDirectory = await mkdtemp(join(tmpdir(), "agentroom-attached-"));
+    temporaryDirectories.push(stateDirectory);
+    const stateFile = join(stateDirectory, "state.json");
+    await saveCodexState(stateFile, {
+      threadId: "thread_existing",
+      resumeRequired: true,
+    });
+    const appServer = {
+      isRunning: vi.fn(() => false),
+      start: vi.fn(async () => undefined),
+      resumeThread: vi.fn(async () => {
+        throw new Error("thread is unavailable");
+      }),
+      startOrResumeThread: vi.fn(async () => "thread_new"),
+      runTurn: vi.fn(async () => "Done"),
+      close: vi.fn(),
+    } as unknown as CodexAppServerClient;
+    const runner = new CodexTaskRunner(appServer, stateFile);
+
+    await expect(runner.run(pendingDelivery())).rejects.toThrow(
+      "thread is unavailable",
+    );
+    expect(appServer.resumeThread).toHaveBeenCalledWith("thread_existing");
+    expect(appServer.startOrResumeThread).not.toHaveBeenCalled();
   });
 });
 

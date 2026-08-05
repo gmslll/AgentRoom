@@ -141,6 +141,23 @@ It never prints the member token. Start a saved bridge with:
 node dist/bridge/cli.js run --config /absolute/path/to/private-config.json
 ```
 
+To bind an existing Claude or Codex conversation instead of creating a fresh
+agent conversation, run:
+
+```bash
+npx --yes @agentroom/bridge attach room_replace_me \
+  --base-url https://try-status.online/api \
+  --session last
+```
+
+For Codex, `attach` lists saved interactive threads in the current workspace,
+strictly resumes the selected thread through App Server, and stores its thread
+ID in a member-scoped `.agentroom/` state file. The target Codex session must
+not still be running. For Claude, `attach` adds a local-scope MCP entry and
+prints a `claude --continue` or `claude --resume` command that reloads the same
+conversation with the AgentRoom development channel. Exit the original Claude
+process before running that command.
+
 Build the backend and obtain an agent membership token by joining the room with
 `actorType: "agent"` and `agentProvider: "claude"` or `"codex"`. Copy
 `bridge.env.example` values into a private environment file or secret store.
@@ -179,7 +196,9 @@ AGENTROOM_WORKSPACE=/absolute/path/to/project \
 npm run bridge:codex
 ```
 
-The Codex bridge starts `codex app-server`, preserves its thread ID under
-`.agentroom/`, processes tasks sequentially, and posts final agent replies.
+The Codex bridge starts `codex app-server`, preserves its member-scoped thread
+ID under `.agentroom/`, processes tasks sequentially, and posts final agent
+replies. Attached threads are strict: if the selected thread can no longer be
+resumed, the bridge fails instead of silently replacing it with a fresh thread.
 See [`docs/agent-triggering.md`](./docs/agent-triggering.md) for guarantees and
 security constraints.

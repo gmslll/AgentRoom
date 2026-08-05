@@ -48,6 +48,13 @@ start Claude with `--dangerously-load-development-channels server:agentroom`.
 Events arrive only while that Claude session and its channel process are
 running. Ordinary MCP servers and hooks do not wake an idle Claude turn.
 
+`agentroom attach` configures the channel as a local-scope MCP server and
+prints a resume command for an existing Claude conversation. Channel opt-in is
+a startup setting, so an already open Claude process must exit and resume with
+the printed development-channel flag. Resuming preserves the conversation;
+starting the same session concurrently in two terminals is unsupported by the
+AgentRoom workflow.
+
 ## Codex
 
 Codex does not currently expose the Claude Channel extension. The Codex adapter
@@ -62,8 +69,16 @@ therefore acts as the local session host:
 
 The adapter uses the user's existing Codex authentication and default model.
 Turns run with a workspace-write sandbox, no network access, and no interactive
-approval escalation. The state file contains only the Codex thread ID and is
-stored under `.agentroom/` by default.
+approval escalation. The state file contains only the Codex thread ID and
+attachment policy and is stored under `.agentroom/` by default. State paths
+include the AgentRoom member ID so two local agents in the same room cannot
+accidentally share a thread.
+
+`agentroom attach` calls `thread/list` for the selected workspace and
+`thread/resume` for the chosen existing conversation. The discovery app-server
+is then closed before the long-running Bridge starts. An attached state is
+marked `resumeRequired`; a missing or invalid thread fails closed instead of
+falling back to `thread/start`.
 
 `codex exec resume` remains a possible fallback for one-shot automation, but
 App Server is the primary integration because it preserves a long-lived thread

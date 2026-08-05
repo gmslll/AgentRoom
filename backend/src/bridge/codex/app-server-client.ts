@@ -24,6 +24,15 @@ interface CompletedTurn {
   error?: string;
 }
 
+export interface CodexThreadSummary {
+  id: string;
+  name?: string;
+  preview?: string;
+  createdAt?: number;
+  updatedAt?: number;
+  status?: string;
+}
+
 export class CodexAppServerClient {
   #process: ChildProcessWithoutNullStreams | undefined;
   #requestId = 0;
@@ -119,10 +128,7 @@ export class CodexAppServerClient {
   async startOrResumeThread(threadId?: string): Promise<string> {
     if (threadId) {
       try {
-        const result = asObject(
-          await this.request("thread/resume", { threadId }),
-        );
-        return requiredNestedId(result, "thread");
+        return await this.resumeThread(threadId);
       } catch (error) {
         if (!this.isRunning()) {
           throw error;
@@ -135,6 +141,25 @@ export class CodexAppServerClient {
       await this.request("thread/start", { cwd: this.workspace }),
     );
     return requiredNestedId(result, "thread");
+  }
+
+  async resumeThread(threadId: string): Promise<string> {
+    const result = asObject(
+      await this.request("thread/resume", { threadId }),
+    );
+    return requiredNestedId(result, "thread");
+  }
+
+  async listThreads(limit = 50): Promise<CodexThreadSummary[]> {
+    const result = await this.request("thread/list", {
+      limit,
+      sortKey: "updated_at",
+      sortDirection: "desc",
+      archived: false,
+      cwd: this.workspace,
+      sourceKinds: ["cli", "vscode", "appServer"],
+    });
+    return parseCodexThreadList(result);
   }
 
   async runTurn(threadId: string, prompt: string): Promise<string> {
@@ -347,6 +372,39 @@ function asObject(value: unknown): Record<string, unknown> {
     return {};
   }
   return value as Record<string, unknown>;
+}
+
+export function parseCodexThreadList(value: unknown): CodexThreadSummary[] {
+  const data = asObject(value).data;
+  if (!Array.isArray(data)) {
+    throw new Error("Codex app-server thread/list response did not include data");
+  }
+
+  return data.flatMap((candidate) => {
+    const thread = asObject(candidate);
+    if (typeof thread.id !== "string" || !thread.id) {
+      return [];
+    }
+    const status = asObject(thread.status).type;
+    return [
+      {
+        id: thread.id,
+        ...(typeof thread.name === "string" && thread.name
+          ? { name: thread.name }
+          : {}),
+        ...(typeof thread.preview === "string" && thread.preview
+          ? { preview: thread.preview }
+          : {}),
+        ...(typeof thread.createdAt === "number"
+          ? { createdAt: thread.createdAt }
+          : {}),
+        ...(typeof thread.updatedAt === "number"
+          ? { updatedAt: thread.updatedAt }
+          : {}),
+        ...(typeof status === "string" ? { status } : {}),
+      },
+    ];
+  });
 }
 
 function requiredNestedId(

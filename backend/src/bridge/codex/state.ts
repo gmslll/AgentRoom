@@ -4,6 +4,7 @@ import { dirname } from "node:path";
 
 export interface CodexBridgeState {
   threadId: string;
+  resumeRequired?: true;
 }
 
 export async function loadCodexState(
@@ -17,7 +18,11 @@ export async function loadCodexState(
       "threadId" in value &&
       typeof value.threadId === "string"
     ) {
-      return { threadId: value.threadId };
+      const record = value as Record<string, unknown>;
+      return {
+        threadId: value.threadId,
+        ...(record.resumeRequired === true ? { resumeRequired: true } : {}),
+      };
     }
     return undefined;
   } catch (error) {

@@ -301,6 +301,8 @@ Content-Type: application/json
 - `member`：当前账号在房间里的 owner 成员身份。
 - `inviteCode`：邀请人类、终端或 AI 加入的能力码。
 - `connectorCommand`：连接本地 Claude/Codex 的命令模板。
+- `connector`：结构化 CLI 信息，其中 `command` 新建会话，`attachCommand` 绑定已有
+  会话。
 - `accessToken`：额外生成的房间成员令牌；网页登录状态继续使用 `ars_`，不要
   用它覆盖账号令牌。
 
@@ -352,6 +354,7 @@ Authorization: Bearer ars_xxx
   "connectorCommand": "npx --yes @agentroom/bridge join room_xxx --base-url \"https://try-status.online/api\"",
   "connector": {
     "command": "npx --yes @agentroom/bridge join room_xxx --base-url \"https://try-status.online/api\"",
+    "attachCommand": "npx --yes @agentroom/bridge attach room_xxx --base-url \"https://try-status.online/api\"",
     "packageName": "@agentroom/bridge",
     "nodeVersion": ">=22",
     "supportedProviders": ["claude", "codex"]
@@ -359,19 +362,22 @@ Authorization: Bearer ars_xxx
 }
 ```
 
-创建房间和旋转邀请码的响应中也包含相同的 `connector` 对象。新前端以
-`connector.command` 为准，`connectorCommand` 只为兼容已有调用保留。
+创建房间和旋转邀请码的响应中也包含相同的 `connector` 对象。
+`connector.command` 用于创建新的 Agent 会话，`connector.attachCommand` 用于绑定
+本机已有的 Claude/Codex 会话；`connectorCommand` 只为兼容已有调用保留。
 
 建议面板内容：
 
 1. 提示用户先安装 Node.js 22+，以及已经登录的 Claude Code 或 Codex CLI。
 2. 提示用户先在终端 `cd` 到希望 AI 操作的项目目录。
-3. 显示一个复制按钮，复制 `connector.command`。
+3. 提供“新会话加入”和“已有会话加入”两个复制按钮，分别复制
+   `connector.command` 与 `connector.attachCommand`。
 4. 邀请码单独显示和复制；CLI 会在终端里交互式询问邀请码、provider 和昵称。
 5. 展示 Claude/Codex 两种 provider 的状态说明，但不要把邀请码追加进命令参数，
    避免秘密进入 Shell 历史。
-6. CLI 加入成功后会把成员令牌写入项目内被 Git 忽略的 `.agentroom/` 私有配置，
-   并输出下一条启动 Bridge 的命令。
+6. CLI 加入成功后会把成员令牌写入项目内被 Git 忽略的 `.agentroom/` 私有配置。
+   `attach` 会让 Codex 选择当前工作区的历史 thread；Claude 会配置本地 MCP 并输出
+   带 Channel 参数的原会话恢复命令。
 7. 连接后根据 `member.joined` 或重新拉取成员列表显示新 agent；在 presence 上线前
    使用“已加入”，不要显示“在线”。
 
@@ -562,5 +568,6 @@ async function connectRoomRealtime(roomId: string, accountToken: string) {
 - 踢出成员和成员令牌撤销尚未实现。
 - 多实例 WebSocket fan-out 和分布式限流尚未接 Redis；当前实时事件只在单个后端
   进程内广播。
-- `@agentroom/bridge` 尚未发布到 npm 时，`connectorCommand` 不能从公网直接安装；
+- `@agentroom/bridge` 尚未发布到 npm 时，`connector.command` 和
+  `connector.attachCommand` 不能从公网直接安装；
   本地源码构建方式见 `backend/README.md`。

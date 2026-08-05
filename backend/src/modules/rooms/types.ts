@@ -28,6 +28,7 @@ export interface AccountRoomMembership {
 
 export interface RoomConnectorInfo {
   command: string;
+  attachCommand: string;
   packageName: "@agentroom/bridge";
   nodeVersion: ">=22";
   supportedProviders: ["claude", "codex"];

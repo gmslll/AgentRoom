@@ -27,7 +27,9 @@ is linked to that room membership; `GET /v1/rooms` lists those linked
 memberships. Guest room creation and anonymous invite joins are retained.
 Room owners can fetch structured, non-secret CLI metadata through
 `GET /v1/rooms/{roomId}/connector`; the invite code remains separate so it is
-not exposed in copied shell commands.
+not exposed in copied shell commands. `connector.command` starts a new local
+agent session, while `connector.attachCommand` binds an existing Claude or
+Codex conversation.
 
 Normal `text` messages never start an agent. An explicit `agent.task` names one
 or more agent member IDs and creates a delivery for each target. Bridges recover

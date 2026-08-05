@@ -116,8 +116,12 @@ describe("room messaging", () => {
       '--base-url "http://127.0.0.1:8787"',
     );
     expect(created.connectorCommand).not.toContain(created.inviteCode);
+    expect(created.connector.attachCommand).not.toContain(created.inviteCode);
     expect(created.connector).toEqual({
       command: created.connectorCommand,
+      attachCommand:
+        `npx --yes @agentroom/bridge attach ${created.room.id}` +
+        ' --base-url "http://127.0.0.1:8787"',
       packageName: "@agentroom/bridge",
       nodeVersion: ">=22",
       supportedProviders: ["claude", "codex"],
@@ -245,6 +249,9 @@ describe("room messaging", () => {
     expect(connector.json().connectorCommand).toBe(
       connector.json().connector.command,
     );
+    expect(connector.json().connector.attachCommand).toContain(
+      `@agentroom/bridge attach ${created.room.id}`,
+    );
 
     const rotated = await app.inject({
       method: "POST",
@@ -258,6 +265,7 @@ describe("room messaging", () => {
       rotated.json().connector.command,
     );
     expect(rotated.json().connectorCommand).not.toContain(nextInvite);
+    expect(rotated.json().connector.attachCommand).not.toContain(nextInvite);
 
     const oldInvite = await app.inject({
       method: "POST",
@@ -296,6 +304,9 @@ describe("room messaging", () => {
       })
     ).json();
     expect(created.connectorCommand).toContain(
+      '--base-url "https://api.example.com/agentroom"',
+    );
+    expect(created.connector.attachCommand).toContain(
       '--base-url "https://api.example.com/agentroom"',
     );
   });

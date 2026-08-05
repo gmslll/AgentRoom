@@ -466,10 +466,11 @@ export class RoomService {
   }
 
   private connectorInfo(roomId: string): RoomConnectorInfo {
+    const commandSuffix =
+      ` ${roomId}` + ` --base-url ${JSON.stringify(this.publicBaseUrl)}`;
     return {
-      command:
-        `npx --yes @agentroom/bridge join ${roomId}` +
-        ` --base-url ${JSON.stringify(this.publicBaseUrl)}`,
+      command: `npx --yes @agentroom/bridge join${commandSuffix}`,
+      attachCommand: `npx --yes @agentroom/bridge attach${commandSuffix}`,
       packageName: "@agentroom/bridge",
       nodeVersion: ">=22",
       supportedProviders: ["claude", "codex"],
