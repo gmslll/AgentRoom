@@ -10,6 +10,7 @@ node_modules/
 .next/
 dist/
 coverage/
+backend/artifacts/
 
 # Python
 __pycache__/

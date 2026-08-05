@@ -235,6 +235,10 @@ if [[ -e "$release_dir" ]]; then
     echo "Existing release has no compiled server" >&2
     exit 1
   }
+  [[ -f "$release_dir/backend/artifacts/cli/manifest.json" ]] || {
+    echo "Existing release has no packaged CLI" >&2
+    exit 1
+  }
   printf 'reuse\n'
 else
   install -d -m 0755 -o agentroom -g agentroom "$staging_dir"
@@ -254,20 +258,32 @@ if [[ "$RELEASE_STATE" == "build" ]]; then
 
   log "Installing dependencies and building on the server..."
   ssh "${SSH_OPTIONS[@]}" "$DEPLOY_HOST" bash -s -- \
-    "$STAGING_DIR" "$RELEASE_DIR" "$DEPLOY_COMMIT" <<'REMOTE_BUILD'
+    "$STAGING_DIR" "$RELEASE_DIR" "$DEPLOY_COMMIT" \
+    "$PUBLIC_BASE_URL" <<'REMOTE_BUILD'
 set -Eeuo pipefail
 staging_dir=$1
 release_dir=$2
 deploy_commit=$3
+public_base_url=$4
 
 chown -R agentroom:agentroom "$staging_dir"
 sudo -u agentroom /usr/local/bin/npm --prefix "$staging_dir/backend" ci
-sudo -u agentroom /usr/local/bin/npm --prefix "$staging_dir/backend" run build
+sudo -u agentroom env \
+  AGENTROOM_CLI_DOWNLOAD_BASE="$public_base_url/downloads/cli" \
+  /usr/local/bin/npm --prefix "$staging_dir/backend" run build
 sudo -u agentroom /usr/local/bin/npm --prefix "$staging_dir/backend" prune --omit=dev
 
 [[ -f "$staging_dir/backend/dist/api/server.js" ]]
 [[ -f "$staging_dir/backend/dist/database/migrate.js" ]]
 [[ -f "$staging_dir/backend/dist/modules/docs/routes.js" ]]
+[[ -f "$staging_dir/backend/artifacts/cli/manifest.json" ]]
+[[ -f "$staging_dir/backend/artifacts/cli/install.sh" ]]
+[[ -f "$staging_dir/backend/artifacts/cli/install.ps1" ]]
+cli_bundle=$(/usr/local/bin/node -e \
+  'const manifest=require(process.argv[1]); process.stdout.write(manifest.files.bundle.name)' \
+  "$staging_dir/backend/artifacts/cli/manifest.json")
+[[ "$cli_bundle" =~ ^[A-Za-z0-9._-]+$ ]]
+[[ -f "$staging_dir/backend/artifacts/cli/$cli_bundle" ]]
 [[ -f "$staging_dir/shared/contracts/http/openapi.yaml" ]]
 
 printf '%s\n' "$deploy_commit" >"$staging_dir/.agentroom-release"
@@ -383,13 +399,17 @@ while [[ "$attempt" -le 10 ]]; do
       "$public_base_url/health" >/dev/null &&
     curl --max-time 8 --silent --fail \
       "$public_base_url/openapi.yaml" | grep -Fq "url: $public_base_url"; then
-    public_healthy=1
-    break
+    if curl --max-time 8 --silent --fail \
+        "$public_base_url/downloads/cli/manifest.json" |
+      grep -Fq '"schemaVersion":1'; then
+      public_healthy=1
+      break
+    fi
   fi
   sleep 1
   attempt=$((attempt + 1))
 done
-[[ "$public_healthy" -eq 1 ]] || rollback "public API or OpenAPI endpoint"
+[[ "$public_healthy" -eq 1 ]] || rollback "public API, OpenAPI, or CLI download endpoint"
 
 if [[ -n "$old_release" && "$old_release" != "$release_dir" ]]; then
   previous_link="$deploy_root/.previous-$deploy_commit-$$"

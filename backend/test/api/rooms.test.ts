@@ -111,7 +111,7 @@ describe("room messaging", () => {
     expect(created.member.actorType).toBe("human");
     expect(created.accessToken).toMatch(/^art_/);
     expect(created.inviteCode).toMatch(/^ari_/);
-    expect(created.connectorCommand).toContain("@agentroom/bridge");
+    expect(created.connectorCommand).toContain("agentroom join");
     expect(created.connectorCommand).toContain(
       '--base-url "http://127.0.0.1:8787"',
     );
@@ -120,8 +120,15 @@ describe("room messaging", () => {
     expect(created.connector).toEqual({
       command: created.connectorCommand,
       attachCommand:
-        `npx --yes @agentroom/bridge attach ${created.room.id}` +
+        `agentroom attach ${created.room.id}` +
         ' --base-url "http://127.0.0.1:8787"',
+      distribution: "direct-download",
+      installers: {
+        manifestUrl:
+          "http://127.0.0.1:8787/downloads/cli/manifest.json",
+        macosLinuxUrl: "http://127.0.0.1:8787/downloads/cli/install.sh",
+        windowsUrl: "http://127.0.0.1:8787/downloads/cli/install.ps1",
+      },
       packageName: "@agentroom/bridge",
       nodeVersion: ">=22",
       supportedProviders: ["claude", "codex"],
@@ -250,7 +257,7 @@ describe("room messaging", () => {
       connector.json().connector.command,
     );
     expect(connector.json().connector.attachCommand).toContain(
-      `@agentroom/bridge attach ${created.room.id}`,
+      `agentroom attach ${created.room.id}`,
     );
 
     const rotated = await app.inject({
@@ -309,6 +316,14 @@ describe("room messaging", () => {
     expect(created.connector.attachCommand).toContain(
       '--base-url "https://api.example.com/agentroom"',
     );
+    expect(created.connector.installers).toEqual({
+      manifestUrl:
+        "https://api.example.com/agentroom/downloads/cli/manifest.json",
+      macosLinuxUrl:
+        "https://api.example.com/agentroom/downloads/cli/install.sh",
+      windowsUrl:
+        "https://api.example.com/agentroom/downloads/cli/install.ps1",
+    });
   });
 });
 

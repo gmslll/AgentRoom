@@ -25,6 +25,8 @@
   `../shared/contracts/` and update both when public behavior changes.
 - `src/database/` owns migration tooling, while ordered SQL remains in
   `migrations/`.
+- `scripts/` owns backend build/release tooling. `artifacts/cli/` is generated,
+  ignored output and must be rebuilt instead of edited or committed.
 - `src/lib/` is only for small genuinely cross-module primitives. Do not use it
   as a dumping ground for business logic.
 - Keep `test/` paths aligned with the corresponding `src/` boundary.

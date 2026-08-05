@@ -8,6 +8,7 @@ import {
   codexStatePath,
   commandLine,
   formatCodexThread,
+  localCliInvocation,
   resolveCodexThread,
 } from "../../src/connectors/session-attach.js";
 
@@ -27,6 +28,21 @@ const threads = [
 ];
 
 describe("session attachment", () => {
+  it("renders copyable commands for POSIX shells and Windows PowerShell", () => {
+    expect(commandLine("/opt/Agent Room/node", ["it's.mjs"], "darwin")).toBe(
+      `'/opt/Agent Room/node' 'it'\"'\"'s.mjs'`,
+    );
+    expect(
+      commandLine(
+        "C:\\Program Files\\nodejs\\node.exe",
+        ["C:\\Agent Room\\agent's.mjs"],
+        "win32",
+      ),
+    ).toBe(
+      `& 'C:\\Program Files\\nodejs\\node.exe' 'C:\\Agent Room\\agent''s.mjs'`,
+    );
+  });
+
   it("selects Codex threads by recency, number, ID, or exact name", () => {
     expect(resolveCodexThread(threads, "last").id).toBe("thread_latest");
     expect(resolveCodexThread(threads, "2").id).toBe("thread_older");
@@ -114,7 +130,11 @@ describe("session attachment", () => {
       "mem_abcdefghij",
     );
     const configPath = "/work/project/.agentroom/claude.json";
-    const mcpArgs = claudeMcpAddArgs(serverName, configPath);
+    const cli = localCliInvocation(
+      "/Users/example/.local/bin/agentroom.mjs",
+      "/usr/local/bin/node",
+    );
+    const mcpArgs = claudeMcpAddArgs(serverName, configPath, cli);
 
     expect(mcpArgs).toEqual([
       "mcp",
@@ -125,9 +145,8 @@ describe("session attachment", () => {
       "local",
       serverName,
       "--",
-      "npx",
-      "--yes",
-      "@agentroom/bridge",
+      "/usr/local/bin/node",
+      "/Users/example/.local/bin/agentroom.mjs",
       "run",
       "--config",
       configPath,

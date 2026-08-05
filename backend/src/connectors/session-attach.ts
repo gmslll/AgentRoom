@@ -1,6 +1,11 @@
 import { resolve } from "node:path";
 import type { CodexThreadSummary } from "./codex/app-server-client.js";
 
+export interface CommandInvocation {
+  command: string;
+  args: string[];
+}
+
 export function resolveCodexThread(
   threads: CodexThreadSummary[],
   selector: string,
@@ -88,6 +93,7 @@ export function claudeServerName(roomId: string, memberId: string): string {
 export function claudeMcpAddArgs(
   serverName: string,
   configPath: string,
+  cli: CommandInvocation,
 ): string[] {
   return [
     "mcp",
@@ -98,13 +104,22 @@ export function claudeMcpAddArgs(
     "local",
     serverName,
     "--",
-    "npx",
-    "--yes",
-    "@agentroom/bridge",
+    cli.command,
+    ...cli.args,
     "run",
     "--config",
     configPath,
   ];
+}
+
+export function localCliInvocation(
+  entry = process.env.AGENTROOM_CLI_ENTRY ?? process.argv[1],
+  executable = process.execPath,
+): CommandInvocation {
+  if (!entry) {
+    throw new Error("Could not determine the local AgentRoom CLI entrypoint");
+  }
+  return { command: executable, args: [resolve(entry)] };
 }
 
 export function claudeResumeArgs(
@@ -120,7 +135,14 @@ export function claudeResumeArgs(
     : ["--resume", session, ...channelArgs];
 }
 
-export function commandLine(command: string, args: string[]): string {
+export function commandLine(
+  command: string,
+  args: string[],
+  platform = process.platform,
+): string {
+  if (platform === "win32") {
+    return `& ${[command, ...args].map(powerShellQuote).join(" ")}`;
+  }
   return [command, ...args].map(shellQuote).join(" ");
 }
 
@@ -134,4 +156,8 @@ function terminalSafe(value: string): string {
 
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
+
+function powerShellQuote(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
 }

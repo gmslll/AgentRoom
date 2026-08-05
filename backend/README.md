@@ -112,6 +112,8 @@ src/
 │   └── docs/               # Swagger and OpenAPI routes
 test/                       # Mirrors api/, connectors/, and modules/
 migrations/                 # Ordered PostgreSQL migrations
+scripts/                    # Backend build/release tooling
+artifacts/cli/              # Generated direct-download CLI release (ignored)
 ```
 
 Dependency direction is inward: `api/` composes modules, modules own business
@@ -127,9 +129,33 @@ Single-host production deployment is documented in
 
 ## Triggering local agents
 
-After the bridge package is published, the room creation response contains a
-copyable `npx @agentroom/bridge join ...` command. In a source checkout, build
-the backend and run the same CLI directly:
+Room responses contain direct installer URLs plus copyable `agentroom join` and
+`agentroom attach` commands. The server builds one Node.js 22 bundle that runs
+on macOS, Linux, and Windows and publishes two native installer scripts.
+
+macOS/Linux:
+
+```bash
+curl -fL -o agentroom-install.sh \
+  https://try-status.online/api/downloads/cli/install.sh
+sh agentroom-install.sh
+~/.local/bin/agentroom --help
+```
+
+Windows PowerShell:
+
+```powershell
+Invoke-WebRequest https://try-status.online/api/downloads/cli/install.ps1 `
+  -OutFile agentroom-install.ps1
+powershell -ExecutionPolicy Bypass -File .\agentroom-install.ps1
+agentroom --help
+```
+
+Both installers verify the bundle SHA-256 from the generated release before
+installing it into a user-local binary directory. Windows adds that directory
+to the user PATH; macOS/Linux prints the required PATH command when needed.
+They never require administrator access, npm, or npx. In a source checkout,
+build the backend and run the same CLI directly:
 
 ```bash
 node dist/connectors/cli.js join room_replace_me \
@@ -151,7 +177,7 @@ To bind an existing Claude or Codex conversation instead of creating a fresh
 agent conversation, run:
 
 ```bash
-npx --yes @agentroom/bridge attach room_replace_me \
+agentroom attach room_replace_me \
   --base-url https://try-status.online/api \
   --session last
 ```

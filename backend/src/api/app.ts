@@ -9,6 +9,7 @@ import type { AuthRepository } from "../modules/auth/repository.js";
 import { registerAuthRoutes } from "../modules/auth/routes.js";
 import { AuthService } from "../modules/auth/service.js";
 import { registerDocumentationRoutes } from "../modules/docs/routes.js";
+import { registerDownloadRoutes } from "../modules/downloads/routes.js";
 import { registerHealthRoutes } from "../modules/health/routes.js";
 import { InMemoryEventBus } from "../modules/realtime/event-bus.js";
 import { registerRealtimeRoutes } from "../modules/realtime/routes.js";
@@ -27,6 +28,7 @@ export interface BuildAppOptions {
   authRepository?: AuthRepository;
   authSessionTtlMs?: number;
   publicBaseUrl?: string;
+  cliArtifactsDirectory?: string;
 }
 
 export async function buildApp(
@@ -51,6 +53,7 @@ export async function buildApp(
     options.publicBaseUrl ?? "http://127.0.0.1:8787",
   );
   await registerDocumentationRoutes(app, publicBaseUrl);
+  registerDownloadRoutes(app, options.cliArtifactsDirectory);
 
   const repository: RoomRepository =
     options.repository ??

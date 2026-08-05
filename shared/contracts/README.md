@@ -29,7 +29,9 @@ Room owners can fetch structured, non-secret CLI metadata through
 `GET /v1/rooms/{roomId}/connector`; the invite code remains separate so it is
 not exposed in copied shell commands. `connector.command` starts a new local
 agent session, while `connector.attachCommand` binds an existing Claude or
-Codex conversation.
+Codex conversation. `connector.installers` exposes public macOS/Linux and
+Windows downloads plus the checksum manifest; installed commands do not use
+npm or npx.
 
 Normal `text` messages never start an agent. An explicit `agent.task` names one
 or more agent member IDs and creates a delivery for each target. Bridges recover

@@ -468,9 +468,16 @@ export class RoomService {
   private connectorInfo(roomId: string): RoomConnectorInfo {
     const commandSuffix =
       ` ${roomId}` + ` --base-url ${JSON.stringify(this.publicBaseUrl)}`;
+    const downloadBase = `${this.publicBaseUrl}/downloads/cli`;
     return {
-      command: `npx --yes @agentroom/bridge join${commandSuffix}`,
-      attachCommand: `npx --yes @agentroom/bridge attach${commandSuffix}`,
+      command: `agentroom join${commandSuffix}`,
+      attachCommand: `agentroom attach${commandSuffix}`,
+      distribution: "direct-download",
+      installers: {
+        manifestUrl: `${downloadBase}/manifest.json`,
+        macosLinuxUrl: `${downloadBase}/install.sh`,
+        windowsUrl: `${downloadBase}/install.ps1`,
+      },
       packageName: "@agentroom/bridge",
       nodeVersion: ">=22",
       supportedProviders: ["claude", "codex"],

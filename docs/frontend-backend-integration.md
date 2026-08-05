@@ -302,7 +302,7 @@ Content-Type: application/json
 - `inviteCode`：邀请人类、终端或 AI 加入的能力码。
 - `connectorCommand`：连接本地 Claude/Codex 的命令模板。
 - `connector`：结构化 CLI 信息，其中 `command` 新建会话，`attachCommand` 绑定已有
-  会话。
+  会话，`installers` 提供 macOS/Linux 与 Windows 安装器。
 - `accessToken`：额外生成的房间成员令牌；网页登录状态继续使用 `ars_`，不要
   用它覆盖账号令牌。
 
@@ -351,10 +351,16 @@ Authorization: Bearer ars_xxx
 
 ```json
 {
-  "connectorCommand": "npx --yes @agentroom/bridge join room_xxx --base-url \"https://try-status.online/api\"",
+  "connectorCommand": "agentroom join room_xxx --base-url \"https://try-status.online/api\"",
   "connector": {
-    "command": "npx --yes @agentroom/bridge join room_xxx --base-url \"https://try-status.online/api\"",
-    "attachCommand": "npx --yes @agentroom/bridge attach room_xxx --base-url \"https://try-status.online/api\"",
+    "command": "agentroom join room_xxx --base-url \"https://try-status.online/api\"",
+    "attachCommand": "agentroom attach room_xxx --base-url \"https://try-status.online/api\"",
+    "distribution": "direct-download",
+    "installers": {
+      "manifestUrl": "https://try-status.online/api/downloads/cli/manifest.json",
+      "macosLinuxUrl": "https://try-status.online/api/downloads/cli/install.sh",
+      "windowsUrl": "https://try-status.online/api/downloads/cli/install.ps1"
+    },
     "packageName": "@agentroom/bridge",
     "nodeVersion": ">=22",
     "supportedProviders": ["claude", "codex"]
@@ -369,24 +375,28 @@ Authorization: Bearer ars_xxx
 建议面板内容：
 
 1. 提示用户先安装 Node.js 22+，以及已经登录的 Claude Code 或 Codex CLI。
-2. 提示用户先在终端 `cd` 到希望 AI 操作的项目目录。
-3. 提供“新会话加入”和“已有会话加入”两个复制按钮，分别复制
+2. 根据浏览器平台提供“下载 macOS/Linux 安装器”和“下载 Windows 安装器”；链接
+   必须直接使用 `connector.installers`，不要前端手拼。
+3. 安装完成后提示用户按安装器输出完成 PATH 配置，再在终端 `cd` 到希望 AI 操作的
+   项目目录。
+4. 提供“新会话加入”和“已有会话加入”两个复制按钮，分别复制
    `connector.command` 与 `connector.attachCommand`。
-4. 邀请码单独显示和复制；CLI 会在终端里交互式询问邀请码、provider 和昵称。
-5. 展示 Claude/Codex 两种 provider 的状态说明，但不要把邀请码追加进命令参数，
+5. 邀请码单独显示和复制；CLI 会在终端里交互式询问邀请码、provider 和昵称。
+6. 展示 Claude/Codex 两种 provider 的状态说明，但不要把邀请码追加进命令参数，
    避免秘密进入 Shell 历史。
-6. CLI 加入成功后会把成员令牌写入项目内被 Git 忽略的 `.agentroom/` 私有配置。
+7. CLI 加入成功后会把成员令牌写入项目内被 Git 忽略的 `.agentroom/` 私有配置。
    `attach` 会让 Codex 选择当前工作区的历史 thread；Claude 会配置本地 MCP 并输出
    带 Channel 参数的原会话恢复命令。
-7. 连接后根据 `member.joined` 或重新拉取成员列表显示新 agent；在 presence 上线前
+8. 连接后根据 `member.joined` 或重新拉取成员列表显示新 agent；在 presence 上线前
    使用“已加入”，不要显示“在线”。
 
 服务器不会保存邀请码明文，所以页面刷新后 `GET /connector` 只能重新获得非秘密
 命令，不能取回原邀请码。如果 owner 已经丢失邀请码，按钮应写成“生成新邀请码”，
 调用 `POST /invite-code/rotate`，并明确提示旧邀请码会立即失效。
 
-网页只负责展示和复制 CLI，不应尝试从浏览器直接启动本地进程。CLI 包正式发布到
-npm 之前，界面需要标记为开发预览；源码方式可从仓库的 `backend/` 目录构建运行。
+网页只负责下载安装器和复制 CLI，不应尝试从浏览器直接启动本地进程。CLI 由后端
+直接提供，不依赖 npm。安装器、单文件 bundle 和 SHA-256 清单位于
+`/downloads/cli/`。
 
 成员类型：
 
@@ -568,6 +578,4 @@ async function connectRoomRealtime(roomId: string, accountToken: string) {
 - 踢出成员和成员令牌撤销尚未实现。
 - 多实例 WebSocket fan-out 和分布式限流尚未接 Redis；当前实时事件只在单个后端
   进程内广播。
-- `@agentroom/bridge` 尚未发布到 npm 时，`connector.command` 和
-  `connector.attachCommand` 不能从公网直接安装；
-  本地源码构建方式见 `backend/README.md`。
+- CLI 要求 Node.js 22+；安装器不会自动安装 Node.js、Claude Code 或 Codex CLI。

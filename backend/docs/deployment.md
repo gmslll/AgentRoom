@@ -43,6 +43,9 @@ advisory lock.
 Build each release in its immutable commit directory, switch `current`
 atomically, then restart `agentroom.service`. Keep the previous release and
 database backup until the new health check and WebSocket handshake pass.
+The build also creates `backend/artifacts/cli/`: a single cross-platform CLI
+bundle, macOS/Linux and Windows installers, and their SHA-256 manifest. These
+generated files remain inside the immutable release and are not committed.
 
 ## One-command release
 
@@ -97,6 +100,7 @@ systemctl is-active agentroom
 curl --fail http://127.0.0.1:18787/health
 curl --fail https://try-status.online/api/health
 curl --fail https://try-status.online/api/openapi.yaml
+curl --fail https://try-status.online/api/downloads/cli/manifest.json
 journalctl -u agentroom --since "10 minutes ago"
 ```
 

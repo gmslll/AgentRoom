@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: AgentRoom HTTP API
-  version: 0.6.0
+  version: 0.7.0
   description: Control and command API for AgentRoom clients and bridges.
 servers:
   - url: https://try-status.online/api
@@ -10,6 +10,7 @@ servers:
     description: Local development
 tags:
   - name: system
+  - name: downloads
   - name: auth
   - name: rooms
   - name: messages
@@ -43,6 +44,40 @@ paths:
                   status: { const: unavailable }
                   service: { const: agentroom-backend }
                   time: { type: string, format: date-time }
+  /downloads/cli/manifest.json:
+    get:
+      tags: [downloads]
+      operationId: getCliReleaseManifest
+      description: Returns the current direct-download AgentRoom CLI release and checksums.
+      responses:
+        "200":
+          description: Current cross-platform CLI release metadata.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CliReleaseManifest" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+  /downloads/cli/{fileName}:
+    parameters:
+      - in: path
+        name: fileName
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: "^[a-zA-Z0-9._-]+$"
+    get:
+      tags: [downloads]
+      operationId: downloadCliArtifact
+      description: Downloads a manifest-declared CLI bundle or platform installer.
+      responses:
+        "200":
+          description: CLI artifact. Content-Type is selected from validated manifest metadata.
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
   /v1/auth/register:
     post:
       tags: [auth]
@@ -489,15 +524,26 @@ components:
         createdAt: { type: string, format: date-time }
     RoomConnectorInfo:
       type: object
-      required: [command, attachCommand, packageName, nodeVersion, supportedProviders]
+      required: [command, attachCommand, distribution, installers, packageName, nodeVersion, supportedProviders]
       properties:
         command:
           type: string
-          description: Copyable interactive CLI command for a new agent session. It never contains the room invite code.
+          description: Copyable installed-CLI command for a new agent session. It never contains the room invite code.
         attachCommand:
           type: string
-          description: Copyable interactive CLI command for binding an existing Claude or Codex session. It never contains the room invite code.
-        packageName: { const: "@agentroom/bridge" }
+          description: Copyable installed-CLI command for binding an existing Claude or Codex session. It never contains the room invite code.
+        distribution: { const: direct-download }
+        installers:
+          type: object
+          required: [manifestUrl, macosLinuxUrl, windowsUrl]
+          properties:
+            manifestUrl: { type: string, format: uri }
+            macosLinuxUrl: { type: string, format: uri }
+            windowsUrl: { type: string, format: uri }
+        packageName:
+          const: "@agentroom/bridge"
+          deprecated: true
+          description: Legacy npm package identifier retained for older clients; direct downloads are canonical.
         nodeVersion: { const: ">=22" }
         supportedProviders:
           type: array
@@ -506,6 +552,35 @@ components:
             - { const: codex }
           minItems: 2
           maxItems: 2
+    CliReleaseArtifact:
+      type: object
+      required: [name, mediaType, sha256, size]
+      properties:
+        name: { type: string, pattern: "^[a-zA-Z0-9._-]+$" }
+        mediaType: { type: string }
+        sha256: { type: string, pattern: "^[a-f0-9]{64}$" }
+        size: { type: integer, minimum: 1 }
+    CliReleaseManifest:
+      type: object
+      required: [schemaVersion, version, minimumNodeVersion, providers, files]
+      properties:
+        schemaVersion: { const: 1 }
+        version: { type: string }
+        minimumNodeVersion: { const: "22.0.0" }
+        providers:
+          type: array
+          prefixItems:
+            - { const: claude }
+            - { const: codex }
+          minItems: 2
+          maxItems: 2
+        files:
+          type: object
+          required: [bundle, macosLinuxInstaller, windowsInstaller]
+          properties:
+            bundle: { $ref: "#/components/schemas/CliReleaseArtifact" }
+            macosLinuxInstaller: { $ref: "#/components/schemas/CliReleaseArtifact" }
+            windowsInstaller: { $ref: "#/components/schemas/CliReleaseArtifact" }
     Member:
       type: object
       required: [id, roomId, displayName, actorType, agentProvider, role, joinedAt]
@@ -649,6 +724,11 @@ components:
           schema: { $ref: "#/components/schemas/Error" }
     Forbidden:
       description: The supplied invite or capability is not allowed.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    ServiceUnavailable:
+      description: The requested generated release is temporarily unavailable.
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }

@@ -12,6 +12,7 @@ import {
   codexStatePath,
   commandLine,
   formatCodexThread,
+  localCliInvocation,
   resolveCodexThread,
 } from "./session-attach.js";
 import { CodexAppServerClient } from "./codex/app-server-client.js";
@@ -138,6 +139,13 @@ async function joinRoom(args: string[], attach: boolean): Promise<void> {
 
     console.log(`Joined AgentRoom as ${displayName} (${memberId}).`);
     console.log(`Private bridge config written to ${configPath}`);
+    const localCli = localCliInvocation();
+    const runCommand = commandLine(localCli.command, [
+      ...localCli.args,
+      "run",
+      "--config",
+      configPath,
+    ]);
     if (attach && provider === "codex") {
       if (!codexThreadId || !stateFile) {
         throw new Error("Codex session attachment was not initialized");
@@ -147,12 +155,10 @@ async function joinRoom(args: string[], attach: boolean): Promise<void> {
         resumeRequired: true,
       });
       console.log(`Attached existing Codex thread ${codexThreadId}.`);
-      console.log(
-        `Start the bridge with: npx --yes @agentroom/bridge run --config ${shellQuote(configPath)}`,
-      );
+      console.log(`Start the bridge with: ${runCommand}`);
     } else if (attach && provider === "claude") {
       const serverName = claudeServerName(roomId, memberId);
-      const mcpArgs = claudeMcpAddArgs(serverName, configPath);
+      const mcpArgs = claudeMcpAddArgs(serverName, configPath, localCli);
       configureClaudeMcp(claudeCommand, mcpArgs, workspace);
       console.log(`Configured Claude MCP channel ${serverName}.`);
       console.log("Exit the original Claude process before resuming it with:");
@@ -163,14 +169,10 @@ async function joinRoom(args: string[], attach: boolean): Promise<void> {
         ),
       );
     } else if (provider === "codex") {
-      console.log(
-        `Start the bridge with: npx --yes @agentroom/bridge run --config ${shellQuote(configPath)}`,
-      );
+      console.log(`Start the bridge with: ${runCommand}`);
     } else {
       console.log("Configure Claude Code MCP to run:");
-      console.log(
-        `npx --yes @agentroom/bridge run --config ${shellQuote(configPath)}`,
-      );
+      console.log(runCommand);
       console.log(
         "Then load the channel with --dangerously-load-development-channels server:agentroom.",
       );
@@ -425,10 +427,6 @@ function apiError(body: Record<string, unknown>, status: number): string {
   return typeof error?.message === "string"
     ? error.message
     : `AgentRoom join failed with HTTP ${status}`;
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
 function printUsage(): void {

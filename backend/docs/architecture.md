@@ -115,5 +115,6 @@ transactional outbox and Redis fan-out.
    remain.
 3. S3-compatible direct file upload/download with attachment messages.
 4. Package the implemented Claude Channel and Codex App Server bridges as a
-   cross-platform installer and add secure local credential storage.
+   direct-download cross-platform bundle and checksum-verifying macOS/Linux and
+   Windows installers (implemented); secure OS credential storage remains.
 5. Redis fan-out/presence, remote MCP, moderation, and production operations.

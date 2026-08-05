@@ -29,6 +29,13 @@ export interface AccountRoomMembership {
 export interface RoomConnectorInfo {
   command: string;
   attachCommand: string;
+  distribution: "direct-download";
+  installers: {
+    manifestUrl: string;
+    macosLinuxUrl: string;
+    windowsUrl: string;
+  };
+  /** Retained for clients built before direct downloads replaced npm. */
   packageName: "@agentroom/bridge";
   nodeVersion: ">=22";
   supportedProviders: ["claude", "codex"];

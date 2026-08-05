@@ -29,7 +29,8 @@
     "dev": "tsx watch src/api/server.ts",
     "start": "node dist/api/server.js",
     "db:migrate": "tsx src/database/migrate.ts",
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && npm run cli:package",
+    "cli:package": "node scripts/build-cli-release.mjs",
     "bridge:claude": "tsx src/connectors/claude/channel.ts",
     "bridge:codex": "tsx src/connectors/codex/bridge.ts",
     "typecheck": "tsc --noEmit",
@@ -51,6 +52,7 @@
     "@types/node": "^26.1.2",
     "@types/pg": "^8.20.4",
     "@types/ws": "^8.18.1",
+    "esbuild": "^0.28.1",
     "tsx": "^4.23.6",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
