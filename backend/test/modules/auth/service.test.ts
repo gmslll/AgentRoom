@@ -29,19 +29,20 @@ describe("AuthService", () => {
 });
 
 describe("AuthRateLimiter", () => {
-  it("bounds attempts, resets successful keys, and reopens after the window", () => {
+  it("bounds attempts, resets successful keys, and reopens after the window", async () => {
     let now = 1_000;
     const limiter = new AuthRateLimiter(2, 100, 10, () => now);
-    limiter.consume("client");
-    limiter.consume("client");
-    expect(() => limiter.consume("client")).toThrowError(
-      expect.objectContaining({ statusCode: 429, code: "AUTH_RATE_LIMITED" }),
-    );
+    await limiter.consume("client");
+    await limiter.consume("client");
+    await expect(limiter.consume("client")).rejects.toMatchObject({
+      statusCode: 429,
+      code: "AUTH_RATE_LIMITED",
+    });
 
-    limiter.reset("client");
-    expect(() => limiter.consume("client")).not.toThrow();
-    limiter.consume("client");
+    await limiter.reset("client");
+    await expect(limiter.consume("client")).resolves.toBeUndefined();
+    await limiter.consume("client");
     now = 1_100;
-    expect(() => limiter.consume("client")).not.toThrow();
+    await expect(limiter.consume("client")).resolves.toBeUndefined();
   });
 });

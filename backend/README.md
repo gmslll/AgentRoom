@@ -66,19 +66,34 @@ npm run build
 - `POST /v1/auth/login`
 - `GET /v1/auth/me`
 - `POST /v1/auth/logout`
+- `POST /v1/auth/email/verification` (sends a single-use email code)
+- `POST /v1/auth/email/verify`
+- `POST /v1/auth/password/reset-request`
+- `POST /v1/auth/password/reset`
+- `POST /v1/auth/password/change`
+- `GET /v1/auth/oauth/{provider}/authorize` (google | github)
+- `GET /v1/auth/oauth/{provider}/callback`
 - `GET /v1/rooms` (rooms linked to the logged-in account)
 - `POST /v1/rooms`
 - `POST /v1/rooms/:roomId/members`
 - `GET /v1/rooms/:roomId/members`
+- `DELETE /v1/rooms/:roomId/members/:memberId` (owner kick, revokes token)
 - `POST /v1/rooms/:roomId/invite-code/rotate`
 - `GET /v1/rooms/:roomId/connector`
 - `GET /v1/rooms/:roomId/messages`
 - `POST /v1/rooms/:roomId/messages`
 - `GET /v1/rooms/:roomId/deliveries/pending`
 - `POST /v1/rooms/:roomId/deliveries/:deliveryId/status`
-- `POST /v1/rooms/:roomId/deliveries/:deliveryId/reply`
+- `POST /v1/rooms/:roomId/deliveries/:deliveryId/reply` (optional `relay` for AI hand-off)
+- `POST /v1/rooms/:roomId/files/upload-intents` (presigned PUT URL)
+- `POST /v1/rooms/:roomId/files/:fileId/complete`
+- `GET /v1/rooms/:roomId/attachments`
+- `GET /v1/rooms/:roomId/attachments/:attachmentId`
+- `GET /v1/rooms/:roomId/presence`
+- `GET/POST/DELETE /v1/rooms/:roomId/moderation/rules`
 - `POST /v1/rooms/:roomId/realtime-tickets`
 - `GET /v1/realtime?ticket=...` (WebSocket upgrade)
+- `GET/POST /mcp` (remote MCP over Streamable HTTP, bearer-authenticated)
 
 Room IDs identify rooms but are not credentials. Creation returns an invite
 code and a member access token. WebSocket connections use short-lived,

@@ -93,8 +93,8 @@ transactional outbox and Redis fan-out.
 - Joining requires an invite capability or authenticated room policy.
 - Account sessions are random, expiring, revocable, and stored only as hashes.
 - Member access tokens are random, room-scoped, and stored only as hashes.
-  Creation responses reveal raw secrets once; member-token revocation is still
-  planned.
+  Creation responses reveal raw secrets once; member tokens are revoked on
+  removal (owner kick) and stale tokens fail authentication immediately.
 - Passwords are never stored directly. The current credential adapter uses a
   per-password random salt and bounded scrypt parameters.
 - Browser WebSockets use short-lived, single-use tickets to avoid persistent
@@ -109,12 +109,26 @@ transactional outbox and Redis fan-out.
 ## Delivery phases
 
 1. Room creation, membership, text messages, ordered history, and realtime
-   fan-out using in-memory adapters.
+   fan-out using in-memory adapters (implemented).
 2. PostgreSQL schema, account login/registration, migrations, and idempotency
    keys (implemented); transactional outbox and distributed login rate limits
-   remain.
-3. S3-compatible direct file upload/download with attachment messages.
-4. Package the implemented Claude Channel and Codex App Server bridges as a
-   direct-download cross-platform bundle and checksum-verifying macOS/Linux and
-   Windows installers (implemented); secure OS credential storage remains.
-5. Redis fan-out/presence, remote MCP, moderation, and production operations.
+   (implemented; outbox runs post-commit with an in-process drainer — see
+   `modules/realtime/outbox-publisher.ts`).
+3. S3-compatible direct file upload/download with attachment messages
+   (implemented: presigned URLs, quota, SHA-256 verification, simulated scan
+   state; object bytes never flow through the API process).
+4. Direct-download cross-platform bundle and checksum-verifying installers
+   (implemented); secure OS credential storage (implemented:
+   `--credential-store keychain` via @napi-rs/keyring, falls back to the
+   mode-0600 config file).
+5. Redis fan-out/presence, remote MCP, moderation (implemented); OAuth
+   (implemented for Google and GitHub); production operations remain.
+
+## Multi-instance realtime
+
+`RedisEventBus` fans out room events across instances over Redis pub/sub with
+per-instance echo suppression. PostgreSQL repositories persist events (with
+their audience) to the `outbox` table; `OutboxPublisher` drains it every 500ms
+into the event bus using an atomic claim (`FOR UPDATE SKIP LOCKED`), so events
+survive process restarts and each batch is delivered once. In-memory
+development mode publishes directly.

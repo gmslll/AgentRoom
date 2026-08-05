@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { resolve } from "node:path";
 import { parseCodexThreadList } from "../../src/connectors/codex/app-server-client.js";
 import {
   assertCodexThreadAttachable,
@@ -106,7 +107,7 @@ describe("session attachment", () => {
       "mem_second5678",
     );
     expect(first).not.toBe(second);
-    expect(first).toContain(
+    expect(first.replaceAll("\\", "/")).toContain(
       ".agentroom/codex-room_example-mem_first1234.json",
     );
   });
@@ -146,7 +147,7 @@ describe("session attachment", () => {
       serverName,
       "--",
       "/usr/local/bin/node",
-      "/Users/example/.local/bin/agentroom.mjs",
+      resolve("/Users/example/.local/bin/agentroom.mjs"),
       "run",
       "--config",
       configPath,
@@ -162,11 +163,17 @@ describe("session attachment", () => {
       "--dangerously-load-development-channels",
       `server:${serverName}`,
     ]);
-    expect(commandLine("claude", claudeResumeArgs("last", serverName))).toBe(
+    expect(
+      commandLine(
+        "claude",
+        claudeResumeArgs("last", serverName),
+        "darwin",
+      ),
+    ).toBe(
       `'claude' '--continue' '--dangerously-load-development-channels' 'server:${serverName}'`,
     );
-    expect(commandLine("claude", ["session $(touch bad)'name"])).toBe(
-      `'claude' 'session $(touch bad)'"'"'name'`,
-    );
+    expect(
+      commandLine("claude", ["session $(touch bad)'name"], "darwin"),
+    ).toBe(`'claude' 'session $(touch bad)'"'"'name'`);
   });
 });
