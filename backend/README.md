@@ -148,12 +148,13 @@ Windows PowerShell:
 Invoke-WebRequest https://try-status.online/api/downloads/cli/install.ps1 `
   -OutFile agentroom-install.ps1
 powershell -ExecutionPolicy Bypass -File .\agentroom-install.ps1
-agentroom --help
+& "$env:LOCALAPPDATA\AgentRoom\bin\agentroom.cmd" --help
 ```
 
 Both installers verify the bundle SHA-256 from the generated release before
 installing it into a user-local binary directory. Windows adds that directory
-to the user PATH; macOS/Linux prints the required PATH command when needed.
+to the user PATH for new terminals; macOS/Linux prints the required PATH
+command when needed.
 They never require administrator access, npm, or npx. In a source checkout,
 build the backend and run the same CLI directly:
 

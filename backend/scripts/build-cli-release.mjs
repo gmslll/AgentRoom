@@ -247,6 +247,7 @@ if ($PathEntries -notcontains $BinDir) {
 $env:Path = "$BinDir;$env:Path"
 & (Join-Path $BinDir "agentroom.cmd") --help | Out-Null
 Write-Host "AgentRoom CLI installed to $BinDir\\agentroom.cmd"
+Write-Host "Open a new terminal, then run: agentroom --help"
 `;
 }
 
