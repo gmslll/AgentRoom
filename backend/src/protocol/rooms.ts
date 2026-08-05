@@ -60,6 +60,10 @@ export interface RoomMessage {
   idempotencyKey: string | null;
   author: MessageAuthor;
   createdAt: string;
+  moderation?: {
+    state: "clean" | "flagged";
+    reason?: string;
+  };
 }
 
 export interface RoomEvent {
@@ -97,6 +101,16 @@ export interface AgentDelivery {
 export interface PendingAgentDelivery {
   delivery: AgentDelivery;
   task: RoomMessage;
+}
+
+export type ModerationAction = "flag" | "reject";
+
+export interface ModerationRule {
+  id: string;
+  roomId: string;
+  pattern: string;
+  action: ModerationAction;
+  createdAt: string;
 }
 
 export interface DeliveryQueuedEvent {
@@ -141,9 +155,41 @@ export interface MemberJoinedEvent {
   };
 }
 
+export interface MemberRemovedEvent {
+  version: 1;
+  eventId: string;
+  type: "member.removed";
+  roomId: string;
+  occurredAt: string;
+  data: {
+    memberId: string;
+  };
+}
+
+export interface MemberPresenceEvent {
+  version: 1;
+  eventId: string;
+  type: "member.presence";
+  roomId: string;
+  occurredAt: string;
+  data: {
+    memberId: string;
+    online: boolean;
+    lastSeenAt: string | null;
+  };
+}
+
+export interface MemberPresenceSnapshot {
+  memberId: string;
+  online: boolean;
+  lastSeenAt: string | null;
+}
+
 export type RealtimeServerEvent =
   | SessionReadyEvent
   | MemberJoinedEvent
+  | MemberRemovedEvent
+  | MemberPresenceEvent
   | RoomEvent
   | DeliveryQueuedEvent
   | DeliveryUpdatedEvent;

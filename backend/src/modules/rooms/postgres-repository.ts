@@ -8,6 +8,7 @@ import type {
   CreateAgentTaskResult,
   CreateRoomRecord,
   ListMessagesQuery,
+  OutboxEntry,
   ReplyToDeliveryRecord,
   RoomRepository,
   UpdateDeliveryRecord,
@@ -18,6 +19,8 @@ import type {
   AgentDelivery,
   AgentProvider,
   DeliveryStatus,
+  ModerationAction,
+  ModerationRule,
   PendingAgentDelivery,
   Room,
   RoomMember,
@@ -67,6 +70,8 @@ interface MessageRow extends QueryResultRow {
   author_actor_type: ActorType;
   author_agent_provider: AgentProvider | null;
   created_at: Date;
+  moderation_state: string | null;
+  moderation_reason: string | null;
 }
 
 interface DeliveryRow extends QueryResultRow {
@@ -78,6 +83,14 @@ interface DeliveryRow extends QueryResultRow {
   error: string | null;
   created_at: Date;
   updated_at: Date;
+}
+
+interface ModerationRuleRow extends QueryResultRow {
+  id: string;
+  room_id: string;
+  pattern: string;
+  action: string;
+  created_at: Date;
 }
 
 interface PendingRow extends QueryResultRow {
@@ -103,6 +116,8 @@ interface PendingRow extends QueryResultRow {
   message_author_actor_type: ActorType;
   message_author_agent_provider: AgentProvider | null;
   message_created_at: Date;
+  message_moderation_state: string | null;
+  message_moderation_reason: string | null;
 }
 
 export class PostgresRoomRepository implements RoomRepository {
@@ -221,6 +236,7 @@ export class PostgresRoomRepository implements RoomRepository {
        FROM room_members m
        JOIN rooms r ON r.id = m.room_id
        WHERE m.user_id = $1
+         AND m.removed_at IS NULL
        ORDER BY r.created_at DESC, r.id`,
       [userId],
     );
@@ -244,7 +260,7 @@ export class PostgresRoomRepository implements RoomRepository {
 
   async listMembers(roomId: string): Promise<RoomMember[]> {
     const result = await this.#pool.query<MemberRow>(
-      `${memberSelect} WHERE room_id = $1 ORDER BY joined_at, id`,
+      `${memberSelect} WHERE room_id = $1 AND removed_at IS NULL ORDER BY joined_at, id`,
       [roomId],
     );
     return result.rows.map(mapMember);
@@ -261,12 +277,25 @@ export class PostgresRoomRepository implements RoomRepository {
     return result.rows[0] ? mapMember(result.rows[0]) : undefined;
   }
 
+  async isActiveMember(roomId: string, memberId: string): Promise<boolean> {
+    const result = await this.#pool.query<{ exists: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1 FROM room_members
+         WHERE room_id = $1 AND id = $2 AND removed_at IS NULL
+       ) AS exists`,
+      [roomId, memberId],
+    );
+    return result.rows[0]?.exists ?? false;
+  }
+
   async findMemberByTokenHash(
     roomId: string,
     tokenHash: string,
   ): Promise<RoomMember | undefined> {
     const result = await this.#pool.query<MemberRow>(
-      `${memberSelect} WHERE room_id = $1 AND token_hash = $2`,
+      `${memberSelect}
+       WHERE room_id = $1 AND token_hash = $2
+         AND token_revoked_at IS NULL AND removed_at IS NULL`,
       [roomId, tokenHash],
     );
     return result.rows[0] ? mapMember(result.rows[0]) : undefined;
@@ -277,7 +306,7 @@ export class PostgresRoomRepository implements RoomRepository {
     userId: string,
   ): Promise<RoomMember | undefined> {
     const result = await this.#pool.query<MemberRow>(
-      `${memberSelect} WHERE room_id = $1 AND user_id = $2`,
+      `${memberSelect} WHERE room_id = $1 AND user_id = $2 AND removed_at IS NULL`,
       [roomId, userId],
     );
     return result.rows[0] ? mapMember(result.rows[0]) : undefined;
@@ -477,6 +506,128 @@ export class PostgresRoomRepository implements RoomRepository {
     });
   }
 
+  async removeMember(
+    roomId: string,
+    memberId: string,
+    at: string,
+  ): Promise<boolean> {
+    const result = await this.#pool.query(
+      `UPDATE room_members
+       SET token_revoked_at = $1, removed_at = $1
+       WHERE room_id = $2 AND id = $3 AND role <> 'owner' AND removed_at IS NULL`,
+      [at, roomId, memberId],
+    );
+    return (result.rowCount ?? 0) === 1;
+  }
+
+  async listModerationRules(roomId: string): Promise<ModerationRule[]> {
+    const result = await this.#pool.query<ModerationRuleRow>(
+      `SELECT id, room_id, pattern, action, created_at
+       FROM moderation_rules
+       WHERE room_id = $1
+       ORDER BY created_at, id`,
+      [roomId],
+    );
+    return result.rows.map(mapModerationRule);
+  }
+
+  async createModerationRule(
+    rule: ModerationRule,
+    createdByMemberId: string,
+  ): Promise<ModerationRule> {
+    await this.#pool.query(
+      `INSERT INTO moderation_rules
+         (id, room_id, pattern, action, created_by_member_id, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [rule.id, rule.roomId, rule.pattern, rule.action, createdByMemberId, rule.createdAt],
+    );
+    return rule;
+  }
+
+  async deleteModerationRule(
+    roomId: string,
+    ruleId: string,
+  ): Promise<boolean> {
+    const result = await this.#pool.query(
+      "DELETE FROM moderation_rules WHERE id = $1 AND room_id = $2",
+      [ruleId, roomId],
+    );
+    return (result.rowCount ?? 0) === 1;
+  }
+
+  async enqueueOutbox(roomId: string, payload: unknown): Promise<void> {
+    await this.#pool.query(
+      `INSERT INTO outbox (room_id, payload, created_at)
+       VALUES ($1, $2::jsonb, now())`,
+      [roomId, JSON.stringify(payload)],
+    );
+  }
+
+  async listPendingOutbox(limit: number): Promise<OutboxEntry[]> {
+    // Atomically claims and marks a batch of un-published events. FOR UPDATE
+    // SKIP LOCKED lets multiple API instances drain without double-delivery:
+    // rows locked by another instance are skipped this round.
+    const result = await this.#pool.query<{
+      id: string;
+      room_id: string;
+      payload: unknown;
+    }>(
+      `WITH batch AS (
+         SELECT id, room_id, payload
+         FROM outbox
+         WHERE published_at IS NULL
+         ORDER BY id
+         LIMIT $1
+         FOR UPDATE SKIP LOCKED
+       ), marked AS (
+         UPDATE outbox
+         SET published_at = now()
+         WHERE id IN (SELECT id FROM batch)
+         RETURNING id
+       )
+       SELECT id, room_id, payload FROM batch`,
+      [limit],
+    );
+    return result.rows.map((row) => ({
+      id: Number(row.id),
+      roomId: row.room_id,
+      payload: row.payload,
+    }));
+  }
+
+  async markOutboxPublished(ids: number[], publishedAt: string): Promise<void> {
+    if (ids.length === 0) {
+      return;
+    }
+    await this.#pool.query(
+      `UPDATE outbox
+       SET published_at = $1
+       WHERE id = ANY($2::bigint[]) AND published_at IS NULL`,
+      [publishedAt, ids],
+    );
+  }
+
+  async releaseOutbox(ids: number[]): Promise<void> {
+    if (ids.length === 0) {
+      return;
+    }
+    await this.#pool.query(
+      `UPDATE outbox
+       SET published_at = NULL
+       WHERE id = ANY($1::bigint[])`,
+      [ids],
+    );
+  }
+
+  async purgeOutbox(olderThan: string): Promise<number> {
+    const result = await this.#pool.query(
+      `DELETE FROM outbox
+       WHERE published_at IS NOT NULL AND published_at < $1`,
+      [olderThan],
+    );
+    return result.rowCount ?? 0;
+  }
+
   async #insertMember(
     client: Pick<Pool, "query"> | Pick<PoolClient, "query">,
     record: AddMemberRecord,
@@ -521,9 +672,10 @@ export class PostgresRoomRepository implements RoomRepository {
          (id, room_id, sequence, kind, text, attachment_ids,
           target_member_ids, in_reply_to_message_id, idempotency_key,
           author_member_id, author_display_name, author_actor_type,
-          author_agent_provider, created_at)
+          author_agent_provider, created_at, moderation_state,
+          moderation_reason)
        VALUES
-         ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+         ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
       [
         record.id,
         record.roomId,
@@ -539,6 +691,8 @@ export class PostgresRoomRepository implements RoomRepository {
         record.member.actorType,
         record.member.agentProvider,
         record.createdAt,
+        record.moderation?.state ?? null,
+        record.moderation?.reason ?? null,
       ],
     );
     return {
@@ -558,6 +712,7 @@ export class PostgresRoomRepository implements RoomRepository {
         agentProvider: record.member.agentProvider,
       },
       createdAt: record.createdAt,
+      ...(record.moderation ? { moderation: record.moderation } : {}),
     };
   }
 
@@ -617,7 +772,8 @@ const messageSelect = `
   SELECT id, room_id, sequence, kind, text, attachment_ids,
          target_member_ids, in_reply_to_message_id, idempotency_key,
          author_member_id, author_display_name, author_actor_type,
-         author_agent_provider, created_at
+         author_agent_provider, created_at, moderation_state,
+         moderation_reason
   FROM room_messages`;
 
 const deliverySelect = `
@@ -648,7 +804,9 @@ const pendingSelect = `
     m.author_display_name AS message_author_display_name,
     m.author_actor_type AS message_author_actor_type,
     m.author_agent_provider AS message_author_agent_provider,
-    m.created_at AS message_created_at
+    m.created_at AS message_created_at,
+    m.moderation_state AS message_moderation_state,
+    m.moderation_reason AS message_moderation_reason
   FROM agent_deliveries d
   JOIN room_messages m ON m.id = d.task_message_id`;
 
@@ -686,6 +844,14 @@ function mapMessage(row: MessageRow): RoomMessage {
       agentProvider: row.author_agent_provider,
     },
     createdAt: iso(row.created_at),
+    ...(row.moderation_state
+      ? {
+          moderation: {
+            state: row.moderation_state as "clean" | "flagged",
+            ...(row.moderation_reason ? { reason: row.moderation_reason } : {}),
+          },
+        }
+      : {}),
   };
 }
 
@@ -699,6 +865,16 @@ function mapDelivery(row: DeliveryRow): AgentDelivery {
     error: row.error,
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
+  };
+}
+
+function mapModerationRule(row: ModerationRuleRow): ModerationRule {
+  return {
+    id: row.id,
+    roomId: row.room_id,
+    pattern: row.pattern,
+    action: row.action as ModerationAction,
+    createdAt: iso(row.created_at),
   };
 }
 
@@ -729,6 +905,8 @@ function mapPending(row: PendingRow): PendingAgentDelivery {
       author_actor_type: row.message_author_actor_type,
       author_agent_provider: row.message_author_agent_provider,
       created_at: row.message_created_at,
+      moderation_state: row.message_moderation_state,
+      moderation_reason: row.message_moderation_reason,
     }),
   };
 }

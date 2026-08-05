@@ -14,6 +14,7 @@ import type {
 import type {
   AccountRoomMembership,
   AgentDelivery,
+  ModerationRule,
   PendingAgentDelivery,
   Room,
   RoomMember,
@@ -34,6 +35,8 @@ export class InMemoryRoomRepository implements RoomRepository {
   readonly #messages = new Map<string, RoomMessage[]>();
   readonly #idempotencyIndex = new Map<string, string>();
   readonly #deliveries = new Map<string, AgentDelivery>();
+  readonly #removedMembers = new Set<string>();
+  readonly #moderationRules = new Map<string, ModerationRule>();
 
   async createRoom(record: CreateRoomRecord): Promise<void> {
     this.#rooms.set(record.room.id, {
@@ -109,7 +112,7 @@ export class InMemoryRoomRepository implements RoomRepository {
       }
       const member = this.#members.get(memberId);
       const room = member ? this.#rooms.get(member.roomId)?.room : undefined;
-      if (member && room) {
+      if (member && room && !this.#removedMembers.has(member.id)) {
         memberships.push({ room, member });
       }
     }
@@ -120,7 +123,10 @@ export class InMemoryRoomRepository implements RoomRepository {
 
   async listMembers(roomId: string): Promise<RoomMember[]> {
     return [...this.#members.values()]
-      .filter((member) => member.roomId === roomId)
+      .filter(
+        (member) =>
+          member.roomId === roomId && !this.#removedMembers.has(member.id),
+      )
       .sort((left, right) => left.joinedAt.localeCompare(right.joinedAt));
   }
 
@@ -132,12 +138,22 @@ export class InMemoryRoomRepository implements RoomRepository {
     return member?.roomId === roomId ? member : undefined;
   }
 
+  async isActiveMember(roomId: string, memberId: string): Promise<boolean> {
+    const member = this.#members.get(memberId);
+    return (
+      !!member &&
+      member.roomId === roomId &&
+      !this.#removedMembers.has(memberId)
+    );
+  }
+
   async findMemberByTokenHash(
     roomId: string,
     tokenHash: string,
   ): Promise<RoomMember | undefined> {
     const memberId = this.#tokenIndex.get(this.#tokenKey(roomId, tokenHash));
-    return memberId ? this.#members.get(memberId) : undefined;
+    const member = memberId ? this.#members.get(memberId) : undefined;
+    return member && !this.#removedMembers.has(member.id) ? member : undefined;
   }
 
   async findMemberByUserId(
@@ -145,7 +161,8 @@ export class InMemoryRoomRepository implements RoomRepository {
     userId: string,
   ): Promise<RoomMember | undefined> {
     const memberId = this.#userIndex.get(this.#userKey(roomId, userId));
-    return memberId ? this.#members.get(memberId) : undefined;
+    const member = memberId ? this.#members.get(memberId) : undefined;
+    return member && !this.#removedMembers.has(member.id) ? member : undefined;
   }
 
   async appendMessage(record: AppendMessageRecord): Promise<RoomMessage> {
@@ -245,6 +262,7 @@ export class InMemoryRoomRepository implements RoomRepository {
         agentProvider: record.member.agentProvider,
       },
       createdAt: record.createdAt,
+      ...(record.moderation ? { moderation: record.moderation } : {}),
     };
 
     storedRoom.nextSequence += 1;
@@ -390,6 +408,56 @@ export class InMemoryRoomRepository implements RoomRepository {
     };
     this.#deliveries.set(delivery.id, delivery);
     return { delivery, message };
+  }
+
+  async removeMember(
+    roomId: string,
+    memberId: string,
+    at: string,
+  ): Promise<boolean> {
+    const member = this.#members.get(memberId);
+    if (!member || member.roomId !== roomId || member.role === "owner") {
+      return false;
+    }
+    this.#removedMembers.add(memberId);
+    for (const [key, id] of this.#tokenIndex) {
+      if (id === memberId) {
+        this.#tokenIndex.delete(key);
+      }
+    }
+    for (const [key, id] of this.#userIndex) {
+      if (id === memberId) {
+        this.#userIndex.delete(key);
+      }
+    }
+    void at;
+    return true;
+  }
+
+  async listModerationRules(roomId: string): Promise<ModerationRule[]> {
+    return [...this.#moderationRules.values()]
+      .filter((rule) => rule.roomId === roomId)
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  }
+
+  async createModerationRule(
+    rule: ModerationRule,
+    _createdByMemberId: string,
+  ): Promise<ModerationRule> {
+    this.#moderationRules.set(rule.id, rule);
+    return rule;
+  }
+
+  async deleteModerationRule(
+    roomId: string,
+    ruleId: string,
+  ): Promise<boolean> {
+    const rule = this.#moderationRules.get(ruleId);
+    if (!rule || rule.roomId !== roomId) {
+      return false;
+    }
+    this.#moderationRules.delete(ruleId);
+    return true;
   }
 
   #tokenKey(roomId: string, tokenHash: string): string {

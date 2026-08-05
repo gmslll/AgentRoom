@@ -2,6 +2,7 @@ import type {
   AccountRoomMembership,
   AgentDelivery,
   DeliveryStatus,
+  ModerationRule,
   PendingAgentDelivery,
   Room,
   RoomMember,
@@ -33,6 +34,7 @@ export interface AppendMessageRecord {
   inReplyToMessageId: string | null;
   idempotencyKey: string | null;
   createdAt: string;
+  moderation?: RoomMessage["moderation"];
 }
 
 export interface UpdateDeliveryRecord {
@@ -70,6 +72,12 @@ export interface ListMessagesQuery {
   limit: number;
 }
 
+export interface OutboxEntry {
+  id: number;
+  roomId: string;
+  payload: unknown;
+}
+
 export interface RoomRepository {
   close?(): Promise<void>;
   healthCheck?(): Promise<void>;
@@ -81,6 +89,11 @@ export interface RoomRepository {
   listRoomsForUser(userId: string): Promise<AccountRoomMembership[]>;
   listMembers(roomId: string): Promise<RoomMember[]>;
   findMember(roomId: string, memberId: string): Promise<RoomMember | undefined>;
+  /**
+   * True when the member exists, belongs to the room, and has not been
+   * removed (kicked). Used to reject stale realtime tickets.
+   */
+  isActiveMember(roomId: string, memberId: string): Promise<boolean>;
   findMemberByTokenHash(
     roomId: string,
     tokenHash: string,
@@ -109,4 +122,26 @@ export interface RoomRepository {
   replyToDelivery(
     record: ReplyToDeliveryRecord,
   ): Promise<{ delivery: AgentDelivery; message: RoomMessage }>;
+  /** Marks a member as removed and revokes their token. Returns false when missing or the owner. */
+  removeMember(roomId: string, memberId: string, at: string): Promise<boolean>;
+  listModerationRules(roomId: string): Promise<ModerationRule[]>;
+  createModerationRule(
+    rule: ModerationRule,
+    createdByMemberId: string,
+  ): Promise<ModerationRule>;
+  deleteModerationRule(roomId: string, ruleId: string): Promise<boolean>;
+  /**
+   * Persists a realtime event for reliable fan-out. Implemented by the
+   * PostgreSQL repository (transactional outbox table); the in-memory adapter
+   * leaves it undefined and the service publishes directly.
+   */
+  enqueueOutbox?(roomId: string, payload: unknown): Promise<void>;
+  listPendingOutbox?(
+    limit: number,
+  ): Promise<OutboxEntry[]>;
+  markOutboxPublished?(ids: number[], publishedAt: string): Promise<void>;
+  /** Re-queues entries whose fan-out failed so they are retried next drain. */
+  releaseOutbox?(ids: number[]): Promise<void>;
+  /** Deletes published entries older than the given ISO timestamp; returns the number removed. */
+  purgeOutbox?(olderThan: string): Promise<number>;
 }

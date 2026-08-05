@@ -8,7 +8,9 @@ import type {
   AgentProvider,
   ActorType,
   DeliveryStatus,
+  ModerationRule,
   PendingAgentDelivery,
+  RealtimeServerEvent,
   Room,
   RoomConnectorInfo,
   RoomMember,
@@ -49,6 +51,7 @@ export type SendMessageInput =
       roomId: string;
       accessToken: string;
       text: string;
+      attachmentIds?: string[];
     }
   | {
       kind: "agent.task";
@@ -65,6 +68,18 @@ export interface SendMessageResult {
   created: boolean;
 }
 
+export interface RelayResult {
+  message: RoomMessage;
+  deliveries: AgentDelivery[];
+  created: boolean;
+}
+
+export interface ReplyResult {
+  delivery: AgentDelivery;
+  message: RoomMessage;
+  relay?: RelayResult;
+}
+
 const allowedDeliverySources: Record<
   "received" | "running" | "failed",
   DeliveryStatus[]
@@ -74,7 +89,20 @@ const allowedDeliverySources: Record<
   failed: ["queued", "received", "running", "failed"],
 };
 
+export interface RoomServiceOptions {
+  validateAttachments?: (
+    roomId: string,
+    attachmentIds: string[],
+  ) => Promise<boolean>;
+  moderationEnabled?: boolean;
+}
+
 export class RoomService {
+  readonly #attachmentValidator:
+    | ((roomId: string, attachmentIds: string[]) => Promise<boolean>)
+    | undefined;
+  readonly #moderationEnabled: boolean;
+
   constructor(
     private readonly repository: RoomRepository,
     private readonly eventBus: EventBus,
@@ -83,7 +111,11 @@ export class RoomService {
       accessToken: string,
     ) => Promise<UserAccount>,
     private readonly publicBaseUrl = "http://127.0.0.1:8787",
-  ) {}
+    options: RoomServiceOptions = {},
+  ) {
+    this.#attachmentValidator = options.validateAttachments;
+    this.#moderationEnabled = options.moderationEnabled ?? false;
+  }
 
   async createRoom(input: CreateRoomInput): Promise<CreatedRoomAccess> {
     const createdAt = this.now().toISOString();
@@ -152,7 +184,7 @@ export class RoomService {
       tokenHash: hashSecret(accessToken),
     });
 
-    this.eventBus.publish({
+    this.#publish({
       version: 1,
       eventId: createId("evt"),
       type: "member.joined",
@@ -188,7 +220,7 @@ export class RoomService {
     const member = await this.authenticate(input.roomId, input.accessToken);
 
     if (input.kind === "agent.task") {
-      return this.sendAgentTask(input, member);
+      return this.sendAgentTask(input, member, false);
     }
 
     const message = await this.appendMessage({
@@ -198,6 +230,8 @@ export class RoomService {
       text: input.text,
       targetMemberIds: [],
       idempotencyKey: null,
+      attachmentIds: input.attachmentIds ?? [],
+      moderation: await this.#moderationOutcome(input.roomId, input.text),
     });
     this.publishMessage(message);
     return { message, deliveries: [], created: true };
@@ -219,6 +253,42 @@ export class RoomService {
   }): Promise<RoomMember[]> {
     await this.authenticate(input.roomId, input.accessToken);
     return this.repository.listMembers(input.roomId);
+  }
+
+  /** True when the member still belongs to the room and was not removed. */
+  async isActiveMember(roomId: string, memberId: string): Promise<boolean> {
+    return this.repository.isActiveMember(roomId, memberId);
+  }
+
+  async removeMember(input: {
+    roomId: string;
+    accessToken: string;
+    memberId: string;
+  }): Promise<void> {
+    const owner = await this.requireOwner(input.roomId, input.accessToken);
+    if (owner.id === input.memberId) {
+      throw new AppError(
+        400,
+        "CANNOT_REMOVE_OWNER",
+        "The room owner cannot be removed",
+      );
+    }
+    const removed = await this.repository.removeMember(
+      input.roomId,
+      input.memberId,
+      this.now().toISOString(),
+    );
+    if (!removed) {
+      throw new AppError(404, "MEMBER_NOT_FOUND", "Member not found");
+    }
+    this.#publish({
+      version: 1,
+      eventId: createId("evt"),
+      type: "member.removed",
+      roomId: input.roomId,
+      occurredAt: this.now().toISOString(),
+      data: { memberId: input.memberId },
+    });
   }
 
   async rotateInviteCode(input: {
@@ -293,7 +363,8 @@ export class RoomService {
     deliveryId: string;
     accessToken: string;
     text: string;
-  }): Promise<{ delivery: AgentDelivery; message: RoomMessage }> {
+    relay?: { targetMemberIds: string[]; idempotencyKey: string };
+  }): Promise<ReplyResult> {
     const member = await this.authenticate(input.roomId, input.accessToken);
     const { delivery, message } = await this.repository.replyToDelivery({
       roomId: input.roomId,
@@ -306,20 +377,83 @@ export class RoomService {
         text: input.text,
         targetMemberIds: [],
         idempotencyKey: null,
+        attachmentIds: [],
+        moderation: await this.#moderationOutcome(input.roomId, input.text),
       }),
       updatedAt: this.now().toISOString(),
     });
 
     this.publishMessage(message);
     this.publishDeliveryUpdated(delivery);
-    return { delivery, message };
+
+    let relay: RelayResult | undefined;
+    if (input.relay) {
+      relay = await this.sendAgentTask(
+        {
+          kind: "agent.task",
+          roomId: input.roomId,
+          accessToken: input.accessToken,
+          text: message.text,
+          targetMemberIds: input.relay.targetMemberIds,
+          idempotencyKey: input.relay.idempotencyKey,
+        },
+        member,
+        true,
+      );
+    }
+
+    return relay ? { delivery, message, relay } : { delivery, message };
+  }
+
+  async listModerationRules(input: {
+    roomId: string;
+    accessToken: string;
+  }): Promise<ModerationRule[]> {
+    await this.requireOwner(input.roomId, input.accessToken);
+    return this.repository.listModerationRules(input.roomId);
+  }
+
+  async createModerationRule(input: {
+    roomId: string;
+    accessToken: string;
+    pattern: string;
+    action: ModerationRule["action"];
+  }): Promise<ModerationRule> {
+    const owner = await this.requireOwner(input.roomId, input.accessToken);
+    const rule: ModerationRule = {
+      id: createId("mod"),
+      roomId: input.roomId,
+      pattern: input.pattern,
+      action: input.action,
+      createdAt: this.now().toISOString(),
+    };
+    return this.repository.createModerationRule(rule, owner.id);
+  }
+
+  async deleteModerationRule(input: {
+    roomId: string;
+    accessToken: string;
+    ruleId: string;
+  }): Promise<void> {
+    await this.requireOwner(input.roomId, input.accessToken);
+    const deleted = await this.repository.deleteModerationRule(
+      input.roomId,
+      input.ruleId,
+    );
+    if (!deleted) {
+      throw new AppError(404, "RULE_NOT_FOUND", "Moderation rule not found");
+    }
   }
 
   private async sendAgentTask(
     input: Extract<SendMessageInput, { kind: "agent.task" }>,
     member: RoomMember,
+    allowAgentRelay: boolean,
   ): Promise<SendMessageResult> {
-    if (member.role !== "owner") {
+    const allowed =
+      member.role === "owner" ||
+      (allowAgentRelay && member.actorType === "agent");
+    if (!allowed) {
       throw new AppError(
         403,
         "AGENT_TRIGGER_FORBIDDEN",
@@ -358,6 +492,8 @@ export class RoomService {
         text: input.text,
         targetMemberIds,
         idempotencyKey: input.idempotencyKey,
+        attachmentIds: [],
+        moderation: await this.#moderationOutcome(input.roomId, input.text),
       }),
       targetMemberIds,
     });
@@ -367,7 +503,7 @@ export class RoomService {
 
     this.publishMessage(result.message);
     for (const delivery of result.deliveries) {
-      this.eventBus.publish(
+      this.#publish(
         {
           version: 1,
           eventId: createId("evt"),
@@ -390,7 +526,10 @@ export class RoomService {
     text: string;
     targetMemberIds: string[];
     idempotencyKey: string | null;
+    attachmentIds: string[];
+    moderation?: RoomMessage["moderation"];
   }): Promise<RoomMessage> {
+    await this.#validateAttachments(input.roomId, input.attachmentIds);
     return this.repository.appendMessage(this.buildMessageRecord(input));
   }
 
@@ -401,18 +540,89 @@ export class RoomService {
     text: string;
     targetMemberIds: string[];
     idempotencyKey: string | null;
+    attachmentIds: string[];
+    moderation?: RoomMessage["moderation"];
   }): AppendMessageRecord {
     return {
       id: createId("msg"),
       ...input,
       inReplyToMessageId: null,
-      attachmentIds: [],
       createdAt: this.now().toISOString(),
+      ...(input.moderation ? { moderation: input.moderation } : {}),
     };
   }
 
+  /**
+   * Applies room moderation rules. Returns "reject" when a rule forbids the
+   * text (callers throw), otherwise the moderation outcome to attach to the
+   * message. Returns undefined when moderation is disabled.
+   */
+  /**
+   * Applies room moderation and rejects forbidden text with 403 when a rule
+   * demands rejection. Returns the moderation outcome, or undefined when
+   * moderation is disabled.
+   */
+  async #moderationOutcome(
+    roomId: string,
+    text: string,
+  ): Promise<RoomMessage["moderation"] | undefined> {
+    const outcome = await this.#moderate(roomId, text);
+    if (outcome === "reject") {
+      throw new AppError(
+        403,
+        "MODERATION_REJECTED",
+        "This message was rejected by a room moderation rule",
+      );
+    }
+    return outcome;
+  }
+
+  async #moderate(
+    roomId: string,
+    text: string,
+  ): Promise<RoomMessage["moderation"] | "reject" | undefined> {
+    if (!this.#moderationEnabled) {
+      return undefined;
+    }
+    const rules = await this.repository.listModerationRules(roomId);
+    const normalized = text.toLowerCase();
+    for (const rule of rules) {
+      if (normalized.includes(rule.pattern.toLowerCase())) {
+        if (rule.action === "reject") {
+          return "reject";
+        }
+        return { state: "flagged", reason: rule.pattern };
+      }
+    }
+    return { state: "clean" };
+  }
+
+  async #validateAttachments(
+    roomId: string,
+    attachmentIds: string[],
+  ): Promise<void> {
+    if (attachmentIds.length === 0) {
+      return;
+    }
+    if (!this.#attachmentValidator) {
+      throw new AppError(
+        400,
+        "ATTACHMENTS_UNSUPPORTED",
+        "File attachments are not enabled on this server",
+      );
+    }
+    const valid = await this.#attachmentValidator(roomId, attachmentIds);
+    if (!valid) {
+      throw new AppError(
+        400,
+        "INVALID_ATTACHMENT",
+        "One or more attachments do not exist in this room",
+      );
+    }
+  }
+
   private publishMessage(message: RoomMessage): void {
-    this.eventBus.publish({
+    this.#publish({
       version: 1,
       eventId: createId("evt"),
       type: "message.created",
@@ -424,7 +634,7 @@ export class RoomService {
   }
 
   private publishDeliveryUpdated(delivery: AgentDelivery): void {
-    this.eventBus.publish({
+    this.#publish({
       version: 1,
       eventId: createId("evt"),
       type: "delivery.updated",
@@ -432,6 +642,28 @@ export class RoomService {
       occurredAt: delivery.updatedAt,
       data: { delivery },
     });
+  }
+
+  /**
+   * Publishes a realtime event. With a transactional outbox (PostgreSQL mode)
+   * the event is enqueued with its audience and the outbox drainer delivers
+   * it; enqueue failures degrade to direct fan-out. Without an outbox the
+   * event is published immediately.
+   */
+  #publish(event: RealtimeServerEvent, audienceMemberIds?: string[]): void {
+    if (this.repository.enqueueOutbox) {
+      void this.repository
+        .enqueueOutbox(event.roomId, { event, audienceMemberIds })
+        .catch((error) => {
+          console.error(
+            `AgentRoom outbox enqueue failed for ${event.eventId}; falling back to direct fan-out:`,
+            error,
+          );
+          this.eventBus.publish(event, audienceMemberIds);
+        });
+      return;
+    }
+    this.eventBus.publish(event, audienceMemberIds);
   }
 
   private validateAgentProvider(

@@ -61,6 +61,11 @@ const SendMessageBody = Type.Object(
     idempotencyKey: Type.Optional(
       Type.String({ minLength: 8, maxLength: 100 }),
     ),
+    attachmentIds: Type.Optional(
+      Type.Array(Type.String({ minLength: 8, maxLength: 80 }), {
+        maxItems: 10,
+      }),
+    ),
   },
   { additionalProperties: false },
 );
@@ -94,6 +99,42 @@ const UpdateDeliveryBody = Type.Union([
 const ReplyDeliveryBody = Type.Object(
   {
     text: Type.String({ minLength: 1, maxLength: 8_000, pattern: "\\S" }),
+    relay: Type.Optional(
+      Type.Object(
+        {
+          targetMemberIds: Type.Array(
+            Type.String({ minLength: 8, maxLength: 80 }),
+            { minItems: 1, maxItems: 10 },
+          ),
+          idempotencyKey: Type.String({ minLength: 8, maxLength: 100 }),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+  },
+  { additionalProperties: false },
+);
+
+const MemberParams = Type.Object(
+  {
+    roomId: Type.String({ minLength: 8, maxLength: 80 }),
+    memberId: Type.String({ minLength: 8, maxLength: 80 }),
+  },
+  { additionalProperties: false },
+);
+
+const RuleParams = Type.Object(
+  {
+    roomId: Type.String({ minLength: 8, maxLength: 80 }),
+    ruleId: Type.String({ minLength: 8, maxLength: 80 }),
+  },
+  { additionalProperties: false },
+);
+
+const CreateRuleBody = Type.Object(
+  {
+    pattern: Type.String({ minLength: 1, maxLength: 200 }),
+    action: Type.Union([Type.Literal("flag"), Type.Literal("reject")]),
   },
   { additionalProperties: false },
 );
@@ -255,6 +296,16 @@ export function registerRoomRoutes(
           "Text messages cannot target or trigger agents",
         );
       }
+      if (
+        request.body.kind === "agent.task" &&
+        request.body.attachmentIds
+      ) {
+        throw new AppError(
+          400,
+          "INVALID_AGENT_TASK",
+          "Agent tasks cannot carry file attachments",
+        );
+      }
       const result =
         request.body.kind === "agent.task"
           ? await roomService.sendMessage({
@@ -270,6 +321,7 @@ export function registerRoomRoutes(
               roomId: request.params.roomId,
               accessToken,
               text: request.body.text,
+              attachmentIds: request.body.attachmentIds ?? [],
             });
       return reply.status(result.created ? 201 : 200).send({
         message: result.message,
@@ -319,8 +371,70 @@ export function registerRoomRoutes(
           deliveryId: request.params.deliveryId,
           accessToken: readBearerToken(request.headers.authorization),
           text: request.body.text,
+          ...(request.body.relay
+            ? {
+                relay: {
+                  targetMemberIds: request.body.relay.targetMemberIds,
+                  idempotencyKey: request.body.relay.idempotencyKey,
+                },
+              }
+            : {}),
         }),
       ),
+  );
+
+  app.delete<{ Params: Static<typeof MemberParams> }>(
+    "/v1/rooms/:roomId/members/:memberId",
+    { schema: { params: MemberParams } },
+    async (request, reply) => {
+      await roomService.removeMember({
+        roomId: request.params.roomId,
+        memberId: request.params.memberId,
+        accessToken: readBearerToken(request.headers.authorization),
+      });
+      return reply.status(204).send();
+    },
+  );
+
+  app.get<{ Params: Static<typeof RoomParams> }>(
+    "/v1/rooms/:roomId/moderation/rules",
+    { schema: { params: RoomParams } },
+    async (request) => ({
+      items: await roomService.listModerationRules({
+        roomId: request.params.roomId,
+        accessToken: readBearerToken(request.headers.authorization),
+      }),
+    }),
+  );
+
+  app.post<{
+    Params: Static<typeof RoomParams>;
+    Body: Static<typeof CreateRuleBody>;
+  }>(
+    "/v1/rooms/:roomId/moderation/rules",
+    { schema: { params: RoomParams, body: CreateRuleBody } },
+    async (request, reply) =>
+      reply.status(201).send(
+        await roomService.createModerationRule({
+          roomId: request.params.roomId,
+          accessToken: readBearerToken(request.headers.authorization),
+          pattern: request.body.pattern,
+          action: request.body.action,
+        }),
+      ),
+  );
+
+  app.delete<{ Params: Static<typeof RuleParams> }>(
+    "/v1/rooms/:roomId/moderation/rules/:ruleId",
+    { schema: { params: RuleParams } },
+    async (request, reply) => {
+      await roomService.deleteModerationRule({
+        roomId: request.params.roomId,
+        ruleId: request.params.ruleId,
+        accessToken: readBearerToken(request.headers.authorization),
+      });
+      return reply.status(204).send();
+    },
   );
 
   app.post<{ Params: Static<typeof RoomParams> }>(

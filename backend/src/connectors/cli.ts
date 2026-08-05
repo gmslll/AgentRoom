@@ -17,18 +17,19 @@ import {
 } from "./session-attach.js";
 import { CodexAppServerClient } from "./codex/app-server-client.js";
 import { saveCodexState } from "./codex/state.js";
-
-type Provider = "claude" | "codex";
-
-interface StoredBridgeConfig {
-  version: 1;
-  baseUrl: string;
-  roomId: string;
-  accessToken: string;
-  provider: Provider;
-  workspace: string;
-  stateFile?: string;
-}
+import {
+  type Provider,
+  type StoredBridgeConfig,
+  normalizeBaseUrl,
+  parseProvider,
+  parseStoredConfig,
+  resolveKeychainToken,
+} from "./bridge-config.js";
+import {
+  KeychainSecretStore,
+  credentialAccount,
+  resolveCredentialStoreKind,
+} from "./secret-store.js";
 
 const [command, ...args] = process.argv.slice(2);
 
@@ -122,13 +123,31 @@ async function joinRoom(args: string[], attach: boolean): Promise<void> {
         ? codexStatePath(workspace, roomId, memberId)
         : undefined;
     await mkdir(dirname(configPath), { recursive: true, mode: 0o700 });
+
+    // Optionally keep the member token out of the config file, in the OS
+    // credential store (Keychain / Credential Manager / libsecret).
+    let credentialStore: "keychain" | undefined;
+    if (resolveCredentialStoreKind(option(args, "--credential-store")) === "keychain") {
+      const store = new KeychainSecretStore();
+      if (await store.save(credentialAccount(roomId, memberId), accessToken)) {
+        credentialStore = "keychain";
+        console.log("Member token stored in the OS credential store.");
+      } else {
+        console.warn(
+          "OS credential store unavailable; the member token will be written to the config file.",
+        );
+      }
+    }
+
     const config: StoredBridgeConfig = {
       version: 1,
       baseUrl,
       roomId,
-      accessToken,
+      accessToken: credentialStore ? "" : accessToken,
       provider,
       workspace,
+      memberId,
+      ...(credentialStore ? { credentialStore } : {}),
       ...(stateFile ? { stateFile } : {}),
     };
     await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, {
@@ -190,11 +209,15 @@ async function runBridge(args: string[]): Promise<void> {
   const config = parseStoredConfig(
     JSON.parse(await readFile(resolve(configPath), "utf8")) as unknown,
   );
+  const accessToken =
+    config.credentialStore === "keychain"
+      ? await resolveKeychainToken(config)
+      : config.accessToken;
   const releaseLock = await acquireLock(`${resolve(configPath)}.lock`);
   try {
     process.env.AGENTROOM_BASE_URL = config.baseUrl;
     process.env.AGENTROOM_ROOM_ID = config.roomId;
-    process.env.AGENTROOM_ACCESS_TOKEN = config.accessToken;
+    process.env.AGENTROOM_ACCESS_TOKEN = accessToken;
     process.env.AGENTROOM_WORKSPACE = config.workspace;
     if (config.stateFile) {
       process.env.AGENTROOM_STATE_FILE = config.stateFile;
@@ -242,23 +265,6 @@ function processExists(pid: number): boolean {
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === "EPERM";
   }
-}
-
-function parseStoredConfig(value: unknown): StoredBridgeConfig {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error("Bridge config must be a JSON object");
-  }
-  const config = value as Record<string, unknown>;
-  const stateFile = optionalString(config, "stateFile");
-  return {
-    version: 1,
-    baseUrl: normalizeBaseUrl(requiredString(config, "baseUrl")),
-    roomId: requiredString(config, "roomId"),
-    accessToken: requiredString(config, "accessToken"),
-    provider: parseProvider(requiredString(config, "provider")),
-    workspace: resolve(requiredString(config, "workspace")),
-    ...(stateFile ? { stateFile: resolve(stateFile) } : {}),
-  };
 }
 
 async function chooseCodexThread(
@@ -366,46 +372,6 @@ async function requiredPrompt(
   return value;
 }
 
-function parseProvider(value: string): Provider {
-  if (value !== "claude" && value !== "codex") {
-    throw new Error("Provider must be claude or codex");
-  }
-  return value;
-}
-
-function normalizeBaseUrl(value: string): string {
-  const url = new URL(value);
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error("Base URL must use http or https");
-  }
-  return url.toString().replace(/\/$/, "");
-}
-
-function requiredString(
-  value: Record<string, unknown>,
-  key: string,
-): string {
-  const result = value[key];
-  if (typeof result !== "string" || !result) {
-    throw new Error(`Bridge config is missing ${key}`);
-  }
-  return result;
-}
-
-function optionalString(
-  value: Record<string, unknown>,
-  key: string,
-): string | undefined {
-  const result = value[key];
-  if (result === undefined) {
-    return undefined;
-  }
-  if (typeof result !== "string" || !result) {
-    throw new Error(`Bridge config field ${key} must be a non-empty string`);
-  }
-  return result;
-}
-
 function requiredNestedString(
   value: Record<string, unknown>,
   key: string,
@@ -435,8 +401,10 @@ function printUsage(): void {
 Usage:
   agentroom join <room-id> [--invite CODE] [--provider claude|codex]
                  [--name NAME] [--base-url URL] [--workspace PATH]
+                 [--credential-store file|keychain]
   agentroom attach <room-id> [--invite CODE] [--provider claude|codex]
                    [--session last|ID|NAME] [--name NAME]
                    [--base-url URL] [--workspace PATH]
+                   [--credential-store file|keychain]
   agentroom run --config PATH`);
 }

@@ -7,7 +7,15 @@ const app = await buildApp({
   corsOrigin: config.corsOrigin,
   authSessionTtlMs: config.authSessionTtlMs,
   publicBaseUrl: config.publicBaseUrl,
+  files: config.files,
+  s3: config.s3,
+  mail: config.mail,
+  oauth: config.oauth,
+  frontendUrl: config.frontendUrl,
+  moderationEnabled: config.moderationEnabled,
+  mcpEnabled: config.mcpEnabled,
   ...(config.databaseUrl ? { databaseUrl: config.databaseUrl } : {}),
+  ...(config.redisUrl ? { redisUrl: config.redisUrl } : {}),
 });
 
 async function shutdown(signal: string): Promise<void> {
