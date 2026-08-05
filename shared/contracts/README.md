@@ -38,4 +38,34 @@ or more agent member IDs and creates a delivery for each target. Bridges recover
 pending deliveries over HTTP and receive `delivery.queued` in realtime.
 Authenticated clients discover target IDs through `GET
 /v1/rooms/{roomId}/members`; active WebSocket clients also receive
-`member.joined` when a new human, terminal, or agent joins.
+`member.joined` when a new human, terminal, or agent joins, `member.removed`
+when the owner kicks a member, and `member.presence` when a member's online
+state changes.
+
+## Newer capabilities (contract v0.8.0)
+
+- **Files**: `POST /v1/rooms/{roomId}/files/upload-intents` returns a
+  short-lived presigned PUT URL; clients upload bytes directly to S3-compatible
+  object storage and then `POST .../files/{fileId}/complete`. Attachment
+  metadata is listed through `/attachments`, and `text` messages accept
+  `attachmentIds`. Quota and SHA-256 verification happen on completion.
+- **Kick**: `DELETE /v1/rooms/{roomId}/members/{memberId}` (owner only) removes
+  the member and revokes their token immediately.
+- **Presence**: `GET /v1/rooms/{roomId}/presence` plus `member.presence` events.
+  WebSocket connections keep the presence key alive; closing or crashing clears
+  it within the TTL.
+- **Accounts**: email verification (`/v1/auth/email/*`), password reset and
+  change (`/v1/auth/password/*`), and Google/GitHub OAuth
+  (`/v1/auth/oauth/{provider}/*`). OAuth callbacks redirect to `FRONTEND_URL`
+  with `#access_token=...&expires_at=...`.
+- **AI relay**: `POST .../deliveries/{deliveryId}/reply` accepts an optional
+  `relay` object; when present, a new `agent.task` authored by the replying
+  agent is created for the relay targets (agent-to-agent hand-off).
+- **Moderation**: owners manage per-room `flag`/`reject` substring rules under
+  `/v1/rooms/{roomId}/moderation/rules`. Flagged messages carry
+  `moderation: { state: "flagged", reason }`; rejected sends return 403.
+- **Remote MCP**: `GET/POST /mcp` exposes an MCP server over Streamable HTTP,
+  bearer-authenticated with a room member token. Tools: `room_list_members`,
+  `room_list_messages`, `room_send_text`, `room_send_task`,
+  `room_list_pending_deliveries`, `room_update_delivery_status`,
+  `room_reply_delivery`, `room_list_attachments`.

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: AgentRoom HTTP API
-  version: 0.7.0
+  version: 0.8.0
   description: Control and command API for AgentRoom clients and bridges.
 servers:
   - url: https://try-status.online/api
@@ -15,6 +15,9 @@ tags:
   - name: rooms
   - name: messages
   - name: deliveries
+  - name: files
+  - name: moderation
+  - name: presence
   - name: realtime
 paths:
   /health:
@@ -152,6 +155,150 @@ paths:
         "204":
           description: The current account session was revoked.
         "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/auth/email/verification:
+    post:
+      tags: [auth]
+      operationId: requestEmailVerification
+      description: Sends a single-use verification code to the authenticated account email.
+      security: [{ BearerAuth: [] }]
+      responses:
+        "202":
+          description: Verification email was accepted for delivery.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /v1/auth/email/verify:
+    post:
+      tags: [auth]
+      operationId: verifyAccountEmail
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [code]
+              properties:
+                code: { type: string, minLength: 6, maxLength: 32 }
+      responses:
+        "200":
+          description: The account email is now verified.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user]
+                properties:
+                  user: { $ref: "#/components/schemas/Account" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/auth/password/reset-request:
+    post:
+      tags: [auth]
+      operationId: requestPasswordReset
+      description: Emails a single-use password reset code. The response is identical for unknown emails to avoid account enumeration.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [email]
+              properties:
+                email: { type: string, minLength: 3, maxLength: 254, pattern: "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$" }
+      responses:
+        "202":
+          description: Reset email accepted for delivery.
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /v1/auth/password/reset:
+    post:
+      tags: [auth]
+      operationId: resetPassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [email, code, newPassword]
+              properties:
+                email: { type: string, minLength: 3, maxLength: 254, pattern: "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$" }
+                code: { type: string, minLength: 6, maxLength: 32 }
+                newPassword: { type: string, minLength: 8, maxLength: 128, writeOnly: true }
+      responses:
+        "200":
+          description: The password was reset and all other sessions were revoked.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user]
+                properties:
+                  user: { $ref: "#/components/schemas/Account" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /v1/auth/password/change:
+    post:
+      tags: [auth]
+      operationId: changePassword
+      description: Changes the authenticated account password and revokes all other sessions.
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [currentPassword, newPassword]
+              properties:
+                currentPassword: { type: string, minLength: 8, maxLength: 128, writeOnly: true }
+                newPassword: { type: string, minLength: 8, maxLength: 128, writeOnly: true }
+      responses:
+        "204":
+          description: Password changed and other sessions revoked.
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/auth/oauth/{provider}/authorize:
+    parameters:
+      - in: path
+        name: provider
+        required: true
+        schema: { type: string, enum: [google, github] }
+    get:
+      tags: [auth]
+      operationId: startOAuthAuthorize
+      description: Begins an OAuth 2.0 authorization code flow and redirects the browser to the identity provider.
+      responses:
+        "302":
+          description: Redirect to the identity provider authorization URL.
+        "400": { $ref: "#/components/responses/BadRequest" }
+  /v1/auth/oauth/{provider}/callback:
+    parameters:
+      - in: path
+        name: provider
+        required: true
+        schema: { type: string, enum: [google, github] }
+    get:
+      tags: [auth]
+      operationId: completeOAuthCallback
+      description: Exchanges the authorization code, links or creates the account, and redirects to the frontend with the account session token.
+      parameters:
+        - in: query
+          name: code
+          required: true
+          schema: { type: string }
+        - in: query
+          name: state
+          required: true
+          schema: { type: string }
+      responses:
+        "302":
+          description: Redirect to FRONTEND_URL with the access token in the URL hash fragment.
+        "400": { $ref: "#/components/responses/BadRequest" }
   /v1/rooms:
     get:
       tags: [rooms]
@@ -256,6 +403,47 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+  /v1/rooms/{roomId}/members/{memberId}:
+    parameters:
+      - $ref: "#/components/parameters/RoomId"
+      - in: path
+        name: memberId
+        required: true
+        schema: { type: string, minLength: 8, maxLength: 80 }
+    delete:
+      tags: [rooms]
+      operationId: removeRoomMember
+      description: Removes a member from the room and revokes their access token. The room owner cannot be removed.
+      security: [{ BearerAuth: [] }]
+      responses:
+        "204":
+          description: The member was removed and their token revoked.
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/rooms/{roomId}/presence:
+    parameters:
+      - $ref: "#/components/parameters/RoomId"
+    get:
+      tags: [presence]
+      operationId: listRoomPresence
+      description: Online status of room members, derived from live WebSocket connections.
+      security: [{ BearerAuth: [] }]
+      responses:
+        "200":
+          description: Per-member online state.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/MemberPresence" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /v1/rooms/{roomId}/invite-code/rotate:
     parameters:
       - $ref: "#/components/parameters/RoomId"
@@ -359,6 +547,112 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+  /v1/rooms/{roomId}/files/upload-intents:
+    parameters:
+      - $ref: "#/components/parameters/RoomId"
+    post:
+      tags: [files]
+      operationId: createFileUploadIntent
+      description: Creates an upload intent and a short-lived presigned PUT URL. File bytes go directly to object storage; the API only stores metadata.
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name, mediaType, size]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 255 }
+                mediaType: { type: string, minLength: 1, maxLength: 128, pattern: "^[\\w.+-]+/[\\w.+-]+$" }
+                size: { type: integer, minimum: 1, maximum: 104857600 }
+                sha256: { type: string, pattern: "^[a-f0-9]{64}$" }
+      responses:
+        "201":
+          description: Upload intent created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UploadIntent" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+  /v1/rooms/{roomId}/files/{fileId}/complete:
+    parameters:
+      - $ref: "#/components/parameters/RoomId"
+      - in: path
+        name: fileId
+        required: true
+        schema: { type: string, minLength: 8, maxLength: 80 }
+    post:
+      tags: [files]
+      operationId: completeFileUpload
+      description: Confirms the object was uploaded, verifies size and checksum, and returns attachment metadata plus a download URL.
+      security: [{ BearerAuth: [] }]
+      responses:
+        "200":
+          description: Upload confirmed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [attachment, downloadUrl]
+                properties:
+                  attachment: { $ref: "#/components/schemas/Attachment" }
+                  downloadUrl: { type: string, format: uri }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/rooms/{roomId}/attachments:
+    parameters:
+      - $ref: "#/components/parameters/RoomId"
+    get:
+      tags: [files]
+      operationId: listRoomAttachments
+      description: Attachment metadata for the room.
+      security: [{ BearerAuth: [] }]
+      responses:
+        "200":
+          description: Attachment metadata for the room.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Attachment" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/rooms/{roomId}/attachments/{attachmentId}:
+    parameters:
+      - $ref: "#/components/parameters/RoomId"
+      - in: path
+        name: attachmentId
+        required: true
+        schema: { type: string, minLength: 8, maxLength: 80 }
+    get:
+      tags: [files]
+      operationId: getRoomAttachment
+      description: Attachment metadata plus a short-lived presigned download URL.
+      security: [{ BearerAuth: [] }]
+      responses:
+        "200":
+          description: Attachment metadata and download URL.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [attachment, downloadUrl]
+                properties:
+                  attachment: { $ref: "#/components/schemas/Attachment" }
+                  downloadUrl: { type: string, format: uri }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /v1/rooms/{roomId}/deliveries/pending:
     parameters:
       - $ref: "#/components/parameters/RoomId"
@@ -439,6 +733,18 @@ paths:
               required: [text]
               properties:
                 text: { type: string, minLength: 1, maxLength: 8000, pattern: "\\S" }
+                relay:
+                  type: object
+                  description: Optional automatic hand-off. When present, an agent.task for the new targets is created after the reply, authored by the replying agent.
+                  additionalProperties: false
+                  required: [targetMemberIds, idempotencyKey]
+                  properties:
+                    targetMemberIds:
+                      type: array
+                      minItems: 1
+                      maxItems: 10
+                      items: { type: string, minLength: 8, maxLength: 80 }
+                    idempotencyKey: { type: string, minLength: 8, maxLength: 100 }
       responses:
         "201":
           description: Agent reply was posted and the delivery completed.
@@ -473,6 +779,101 @@ paths:
                   expiresAt: { type: string, format: date-time }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /v1/rooms/{roomId}/moderation/rules:
+    parameters:
+      - $ref: "#/components/parameters/RoomId"
+    get:
+      tags: [moderation]
+      operationId: listModerationRules
+      description: Content moderation rules for the room. Only the owner can manage rules.
+      security: [{ BearerAuth: [] }]
+      responses:
+        "200":
+          description: Moderation rules.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/ModerationRule" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [moderation]
+      operationId: createModerationRule
+      description: Adds a case-insensitive substring moderation rule.
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [pattern, action]
+              properties:
+                pattern: { type: string, minLength: 1, maxLength: 200 }
+                action: { type: string, enum: [flag, reject] }
+      responses:
+        "201":
+          description: Rule created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ModerationRule" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/rooms/{roomId}/moderation/rules/{ruleId}:
+    parameters:
+      - $ref: "#/components/parameters/RoomId"
+      - in: path
+        name: ruleId
+        required: true
+        schema: { type: string, minLength: 8, maxLength: 80 }
+    delete:
+      tags: [moderation]
+      operationId: deleteModerationRule
+      security: [{ BearerAuth: [] }]
+      responses:
+        "204":
+          description: Rule deleted.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /mcp:
+    get:
+      tags: [realtime]
+      operationId: mcpStreamableHttpGet
+      description: Streamable HTTP transport for remote MCP clients. Authenticates with a room member bearer token.
+      responses:
+        "200":
+          description: Server-sent events stream.
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [realtime]
+      operationId: mcpStreamableHttpPost
+      description: JSON-RPC over HTTP for remote MCP clients. Authenticates with a room member bearer token.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: An MCP JSON-RPC message.
+      responses:
+        "200":
+          description: JSON-RPC response.
+          content:
+            application/json:
+              schema: { type: object }
+        "401": { $ref: "#/components/responses/Unauthorized" }
 components:
   securitySchemes:
     BearerAuth:
@@ -498,6 +899,43 @@ components:
         id: { type: string }
         email: { type: string }
         displayName: { type: string }
+        createdAt: { type: string, format: date-time }
+        emailVerifiedAt: { type: [string, "null"] }
+    UploadIntent:
+      type: object
+      required: [fileId, presignedUrl, expiresAt]
+      properties:
+        fileId: { type: string }
+        presignedUrl: { type: string, format: uri }
+        expiresAt: { type: string, format: date-time }
+    Attachment:
+      type: object
+      required: [id, roomId, uploaderMemberId, name, mediaType, size, sha256, scanState, createdAt]
+      properties:
+        id: { type: string }
+        roomId: { type: string }
+        uploaderMemberId: { type: string }
+        name: { type: string }
+        mediaType: { type: string }
+        size: { type: integer, minimum: 1 }
+        sha256: { type: string, pattern: "^[a-f0-9]{64}$" }
+        scanState: { type: string, enum: [pending, clean, flagged] }
+        createdAt: { type: string, format: date-time }
+    MemberPresence:
+      type: object
+      required: [memberId, online, lastSeenAt]
+      properties:
+        memberId: { type: string }
+        online: { type: boolean }
+        lastSeenAt: { type: [string, "null"] }
+    ModerationRule:
+      type: object
+      required: [id, roomId, pattern, action, createdAt]
+      properties:
+        id: { type: string }
+        roomId: { type: string }
+        pattern: { type: string }
+        action: { type: string, enum: [flag, reject] }
         createdAt: { type: string, format: date-time }
     AccountAccess:
       type: object
@@ -627,6 +1065,13 @@ components:
         idempotencyKey: { type: [string, "null"] }
         author: { $ref: "#/components/schemas/MessageAuthor" }
         createdAt: { type: string, format: date-time }
+        moderation:
+          type: [object, "null"]
+          description: Content moderation outcome when moderation is enabled; omitted for messages created before moderation.
+          properties:
+            state: { type: string, enum: [clean, flagged] }
+            reason: { type: string }
+          required: [state]
     TextMessageInput:
       type: object
       additionalProperties: false
@@ -634,6 +1079,10 @@ components:
       properties:
         kind: { const: text }
         text: { type: string, minLength: 1, maxLength: 8000, pattern: "\\S" }
+        attachmentIds:
+          type: array
+          maxItems: 10
+          items: { type: string, minLength: 8, maxLength: 80 }
     AgentTaskInput:
       type: object
       additionalProperties: false
@@ -744,6 +1193,11 @@ components:
           schema: { $ref: "#/components/schemas/Error" }
     TooManyRequests:
       description: Too many authentication attempts from this client.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    PayloadTooLarge:
+      description: The requested file exceeds the room or upload limit.
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
