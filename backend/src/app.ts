@@ -8,6 +8,7 @@ import { PostgresAuthRepository } from "./modules/auth/postgres-repository.js";
 import type { AuthRepository } from "./modules/auth/repository.js";
 import { registerAuthRoutes } from "./modules/auth/routes.js";
 import { AuthService } from "./modules/auth/service.js";
+import { registerDocumentationRoutes } from "./modules/docs/routes.js";
 import { registerHealthRoutes } from "./modules/health/routes.js";
 import { InMemoryEventBus } from "./modules/realtime/event-bus.js";
 import { registerRealtimeRoutes } from "./modules/realtime/routes.js";
@@ -46,6 +47,11 @@ export async function buildApp(
 
   installErrorHandler(app);
 
+  const publicBaseUrl = normalizePublicBaseUrl(
+    options.publicBaseUrl ?? "http://127.0.0.1:8787",
+  );
+  await registerDocumentationRoutes(app, publicBaseUrl);
+
   const repository: RoomRepository =
     options.repository ??
     (options.databaseUrl
@@ -67,9 +73,7 @@ export async function buildApp(
     eventBus,
     undefined,
     (accessToken) => authService.authenticate(accessToken),
-    normalizePublicBaseUrl(
-      options.publicBaseUrl ?? "http://127.0.0.1:8787",
-    ),
+    publicBaseUrl,
   );
 
   registerHealthRoutes(app, async () => {

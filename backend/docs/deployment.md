@@ -58,6 +58,7 @@ Verify all layers after deployment:
 systemctl is-active agentroom
 curl --fail http://127.0.0.1:18787/health
 curl --fail https://try-status.online/api/health
+curl --fail https://try-status.online/api/openapi.yaml
 journalctl -u agentroom --since "10 minutes ago"
 ```
 

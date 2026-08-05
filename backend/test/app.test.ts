@@ -43,6 +43,34 @@ describe("health", () => {
   });
 });
 
+describe("API documentation", () => {
+  it("serves the shared OpenAPI contract and Swagger UI", async () => {
+    const app = await buildApp({
+      publicBaseUrl: "https://try-status.online/api",
+    });
+    apps.push(app);
+    await app.ready();
+
+    const yaml = await app.inject({ method: "GET", url: "/openapi.yaml" });
+    expect(yaml.statusCode).toBe(200);
+    expect(yaml.headers["content-type"]).toContain("application/yaml");
+    expect(yaml.body).toContain("openapi: 3.1.0");
+    expect(yaml.body).toContain("https://try-status.online/api");
+
+    const json = await app.inject({ method: "GET", url: "/docs/json" });
+    expect(json.statusCode).toBe(200);
+    expect(json.json()).toMatchObject({
+      openapi: "3.1.0",
+      info: { title: "AgentRoom HTTP API" },
+    });
+
+    const ui = await app.inject({ method: "GET", url: "/docs" });
+    expect(ui.statusCode).toBe(200);
+    expect(ui.headers["content-type"]).toContain("text/html");
+    expect(ui.body).toContain("/api/docs/static/swagger-ui.css");
+  });
+});
+
 describe("room messaging", () => {
   it("rejects whitespace-only names and messages", async () => {
     const app = await makeApp();

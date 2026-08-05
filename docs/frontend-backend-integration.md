@@ -106,6 +106,11 @@ VITE_API_BASE_URL=https://try-status.online/api
 `wss://try-status.online/api/v1/realtime`。前端不要直接请求线上根路径下的
 `/health` 或 `/v1/*`。
 
+联调时可直接打开 Swagger UI：
+
+- `https://try-status.online/api/docs`：可交互接口文档。
+- `https://try-status.online/api/openapi.yaml`：原始 OpenAPI 3.1 协议文件。
+
 使用 PostgreSQL 时先配置 `DATABASE_URL`，再执行：
 
 ```bash

@@ -25,6 +25,11 @@ npm run dev
 
 The server listens on `http://127.0.0.1:8787` by default.
 
+Interactive Swagger documentation is available at `/docs`, with the original
+shared OpenAPI contract at `/openapi.yaml`. In production these are exposed as
+`https://try-status.online/api/docs` and
+`https://try-status.online/api/openapi.yaml`.
+
 For persistent mode, create a database, set `DATABASE_URL`, apply migrations,
 and then start the service:
 
