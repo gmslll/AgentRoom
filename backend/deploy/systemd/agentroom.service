@@ -1,0 +1,33 @@
+[Unit]
+Description=AgentRoom backend
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=agentroom
+Group=agentroom
+WorkingDirectory=/opt/agentroom/current/backend
+EnvironmentFile=/etc/agentroom/backend.env
+ExecStartPre=/usr/local/bin/node dist/database/migrate.js
+ExecStart=/usr/local/bin/node dist/server.js
+Restart=on-failure
+RestartSec=3s
+TimeoutStartSec=60s
+TimeoutStopSec=30s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

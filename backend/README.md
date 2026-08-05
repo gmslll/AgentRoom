@@ -106,6 +106,8 @@ migrations/                 # Ordered PostgreSQL migrations
 The canonical external contracts live in `../shared/contracts/`.
 Frontend integration steps and request examples are documented in
 [`../docs/frontend-backend-integration.md`](../docs/frontend-backend-integration.md).
+Single-host production deployment is documented in
+[`docs/deployment.md`](./docs/deployment.md).
 
 ## Triggering local agents
 
