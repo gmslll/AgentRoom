@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: AgentRoom HTTP API
-  version: 0.4.0
+  version: 0.5.0
   description: Control and command API for AgentRoom clients and bridges.
 servers:
   - url: http://127.0.0.1:8787
@@ -233,12 +233,35 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [inviteCode, connectorCommand]
+                required: [inviteCode, connectorCommand, connector]
                 properties:
                   inviteCode:
                     type: string
                     readOnly: true
                   connectorCommand: { type: string }
+                  connector: { $ref: "#/components/schemas/RoomConnectorInfo" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/rooms/{roomId}/connector:
+    parameters:
+      - $ref: "#/components/parameters/RoomId"
+    get:
+      tags: [rooms]
+      operationId: getRoomConnectorInfo
+      description: Returns non-secret AgentRoom CLI metadata for the room owner.
+      security: [{ BearerAuth: [] }]
+      responses:
+        "200":
+          description: Copyable CLI command and supported local agent providers.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [connectorCommand, connector]
+                properties:
+                  connectorCommand: { type: string }
+                  connector: { $ref: "#/components/schemas/RoomConnectorInfo" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -462,6 +485,22 @@ components:
         id: { type: string }
         name: { type: string }
         createdAt: { type: string, format: date-time }
+    RoomConnectorInfo:
+      type: object
+      required: [command, packageName, nodeVersion, supportedProviders]
+      properties:
+        command:
+          type: string
+          description: Copyable interactive CLI command. It never contains the room invite code.
+        packageName: { const: "@agentroom/bridge" }
+        nodeVersion: { const: ">=22" }
+        supportedProviders:
+          type: array
+          prefixItems:
+            - { const: claude }
+            - { const: codex }
+          minItems: 2
+          maxItems: 2
     Member:
       type: object
       required: [id, roomId, displayName, actorType, agentProvider, role, joinedAt]
@@ -573,13 +612,14 @@ components:
       allOf:
         - $ref: "#/components/schemas/RoomAccess"
         - type: object
-          required: [inviteCode, connectorCommand]
+          required: [inviteCode, connectorCommand, connector]
           properties:
             inviteCode:
               type: string
               readOnly: true
               description: Raw room invite capability.
             connectorCommand: { type: string }
+            connector: { $ref: "#/components/schemas/RoomConnectorInfo" }
     Error:
       type: object
       required: [error]

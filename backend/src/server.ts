@@ -6,6 +6,7 @@ const app = await buildApp({
   logger: { level: config.logLevel },
   corsOrigin: config.corsOrigin,
   authSessionTtlMs: config.authSessionTtlMs,
+  publicBaseUrl: config.publicBaseUrl,
   ...(config.databaseUrl ? { databaseUrl: config.databaseUrl } : {}),
 });
 

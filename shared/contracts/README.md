@@ -25,6 +25,9 @@ use expiring, revocable `ars_` bearer tokens. Room and bridge capabilities use
 room-scoped `art_` tokens. Room operations accept either token when the account
 is linked to that room membership; `GET /v1/rooms` lists those linked
 memberships. Guest room creation and anonymous invite joins are retained.
+Room owners can fetch structured, non-secret CLI metadata through
+`GET /v1/rooms/{roomId}/connector`; the invite code remains separate so it is
+not exposed in copied shell commands.
 
 Normal `text` messages never start an agent. An explicit `agent.task` names one
 or more agent member IDs and creates a delivery for each target. Bridges recover

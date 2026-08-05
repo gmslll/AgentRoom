@@ -195,6 +195,16 @@ export function registerRoomRoutes(
       }),
   );
 
+  app.get<{ Params: Static<typeof RoomParams> }>(
+    "/v1/rooms/:roomId/connector",
+    { schema: { params: RoomParams } },
+    async (request) =>
+      roomService.getConnectorInfo({
+        roomId: request.params.roomId,
+        accessToken: readBearerToken(request.headers.authorization),
+      }),
+  );
+
   app.get<{
     Params: Static<typeof RoomParams>;
     Querystring: Static<typeof ListMessagesQuery>;

@@ -315,6 +315,53 @@ Content-Type: application/json
 - `POST /v1/rooms/{roomId}/invite-code/rotate`：仅 owner 可用；旧邀请码立即失效，
   返回新 `inviteCode` 和 `connectorCommand`。
 
+### 网页里的 AgentRoom CLI 面板
+
+房间 owner 页面需要提供“连接 Agent”入口。不要在前端手工拼 CLI 命令，直接获取
+后端根据部署地址生成的结构化信息：
+
+```http
+GET /v1/rooms/{roomId}/connector
+Authorization: Bearer ars_xxx
+```
+
+响应：
+
+```json
+{
+  "connectorCommand": "npx --yes @agentroom/bridge join room_xxx --base-url \"https://api.example.com\"",
+  "connector": {
+    "command": "npx --yes @agentroom/bridge join room_xxx --base-url \"https://api.example.com\"",
+    "packageName": "@agentroom/bridge",
+    "nodeVersion": ">=22",
+    "supportedProviders": ["claude", "codex"]
+  }
+}
+```
+
+创建房间和旋转邀请码的响应中也包含相同的 `connector` 对象。新前端以
+`connector.command` 为准，`connectorCommand` 只为兼容已有调用保留。
+
+建议面板内容：
+
+1. 提示用户先安装 Node.js 22+，以及已经登录的 Claude Code 或 Codex CLI。
+2. 提示用户先在终端 `cd` 到希望 AI 操作的项目目录。
+3. 显示一个复制按钮，复制 `connector.command`。
+4. 邀请码单独显示和复制；CLI 会在终端里交互式询问邀请码、provider 和昵称。
+5. 展示 Claude/Codex 两种 provider 的状态说明，但不要把邀请码追加进命令参数，
+   避免秘密进入 Shell 历史。
+6. CLI 加入成功后会把成员令牌写入项目内被 Git 忽略的 `.agentroom/` 私有配置，
+   并输出下一条启动 Bridge 的命令。
+7. 连接后根据 `member.joined` 或重新拉取成员列表显示新 agent；在 presence 上线前
+   使用“已加入”，不要显示“在线”。
+
+服务器不会保存邀请码明文，所以页面刷新后 `GET /connector` 只能重新获得非秘密
+命令，不能取回原邀请码。如果 owner 已经丢失邀请码，按钮应写成“生成新邀请码”，
+调用 `POST /invite-code/rotate`，并明确提示旧邀请码会立即失效。
+
+网页只负责展示和复制 CLI，不应尝试从浏览器直接启动本地进程。CLI 包正式发布到
+npm 之前，界面需要标记为开发预览；源码方式可从仓库的 `backend/` 目录构建运行。
+
 成员类型：
 
 - `human`：人类用户。

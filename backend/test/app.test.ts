@@ -84,7 +84,16 @@ describe("room messaging", () => {
     expect(created.accessToken).toMatch(/^art_/);
     expect(created.inviteCode).toMatch(/^ari_/);
     expect(created.connectorCommand).toContain("@agentroom/bridge");
+    expect(created.connectorCommand).toContain(
+      '--base-url "http://127.0.0.1:8787"',
+    );
     expect(created.connectorCommand).not.toContain(created.inviteCode);
+    expect(created.connector).toEqual({
+      command: created.connectorCommand,
+      packageName: "@agentroom/bridge",
+      nodeVersion: ">=22",
+      supportedProviders: ["claude", "codex"],
+    });
 
     const joinedResponse = await app.inject({
       method: "POST",
@@ -192,6 +201,23 @@ describe("room messaging", () => {
     });
     expect(forbidden.statusCode).toBe(403);
 
+    const hiddenConnector = await app.inject({
+      method: "GET",
+      url: `/v1/rooms/${created.room.id}/connector`,
+      headers: { authorization: `Bearer ${guest.accessToken}` },
+    });
+    expect(hiddenConnector.statusCode).toBe(403);
+
+    const connector = await app.inject({
+      method: "GET",
+      url: `/v1/rooms/${created.room.id}/connector`,
+      headers: { authorization: `Bearer ${created.accessToken}` },
+    });
+    expect(connector.statusCode).toBe(200);
+    expect(connector.json().connectorCommand).toBe(
+      connector.json().connector.command,
+    );
+
     const rotated = await app.inject({
       method: "POST",
       url: `/v1/rooms/${created.room.id}/invite-code/rotate`,
@@ -200,6 +226,10 @@ describe("room messaging", () => {
     expect(rotated.statusCode).toBe(200);
     const nextInvite = rotated.json().inviteCode;
     expect(nextInvite).not.toBe(created.inviteCode);
+    expect(rotated.json().connectorCommand).toBe(
+      rotated.json().connector.command,
+    );
+    expect(rotated.json().connectorCommand).not.toContain(nextInvite);
 
     const oldInvite = await app.inject({
       method: "POST",
@@ -221,6 +251,25 @@ describe("room messaging", () => {
       },
     });
     expect(newInvite.statusCode).toBe(201);
+  });
+
+  it("puts the deployment public URL in copyable CLI commands", async () => {
+    const app = await buildApp({
+      publicBaseUrl: "https://api.example.com/agentroom/",
+    });
+    apps.push(app);
+    await app.ready();
+
+    const created = (
+      await app.inject({
+        method: "POST",
+        url: "/v1/rooms",
+        payload: { displayName: "Owner" },
+      })
+    ).json();
+    expect(created.connectorCommand).toContain(
+      '--base-url "https://api.example.com/agentroom"',
+    );
   });
 });
 

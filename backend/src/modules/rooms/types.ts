@@ -26,6 +26,13 @@ export interface AccountRoomMembership {
   member: RoomMember;
 }
 
+export interface RoomConnectorInfo {
+  command: string;
+  packageName: "@agentroom/bridge";
+  nodeVersion: ">=22";
+  supportedProviders: ["claude", "codex"];
+}
+
 export interface MessageAuthor {
   memberId: string;
   displayName: string;

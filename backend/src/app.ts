@@ -1,6 +1,7 @@
 import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
 import Fastify, { type FastifyInstance } from "fastify";
+import { normalizePublicBaseUrl } from "./config.js";
 import { installErrorHandler } from "./lib/errors.js";
 import { InMemoryAuthRepository } from "./modules/auth/memory-repository.js";
 import { PostgresAuthRepository } from "./modules/auth/postgres-repository.js";
@@ -24,6 +25,7 @@ export interface BuildAppOptions {
   repository?: RoomRepository;
   authRepository?: AuthRepository;
   authSessionTtlMs?: number;
+  publicBaseUrl?: string;
 }
 
 export async function buildApp(
@@ -65,6 +67,9 @@ export async function buildApp(
     eventBus,
     undefined,
     (accessToken) => authService.authenticate(accessToken),
+    normalizePublicBaseUrl(
+      options.publicBaseUrl ?? "http://127.0.0.1:8787",
+    ),
   );
 
   registerHealthRoutes(app, async () => {

@@ -39,6 +39,9 @@ in `schema_migrations`.
 
 Account sessions expire after 30 days by default. Set
 `AUTH_SESSION_TTL_DAYS` to an integer from 1 to 365 to change that window.
+Set `PUBLIC_BASE_URL` to the externally reachable backend origin (and optional
+path prefix). Room connector responses embed this value in copyable CLI
+commands; do not set it to a private container-only address in production.
 
 ```bash
 npm test
@@ -58,6 +61,7 @@ npm run build
 - `POST /v1/rooms/:roomId/members`
 - `GET /v1/rooms/:roomId/members`
 - `POST /v1/rooms/:roomId/invite-code/rotate`
+- `GET /v1/rooms/:roomId/connector`
 - `GET /v1/rooms/:roomId/messages`
 - `POST /v1/rooms/:roomId/messages`
 - `GET /v1/rooms/:roomId/deliveries/pending`

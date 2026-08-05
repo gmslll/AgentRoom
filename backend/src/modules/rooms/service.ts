@@ -10,6 +10,7 @@ import type {
   DeliveryStatus,
   PendingAgentDelivery,
   Room,
+  RoomConnectorInfo,
   RoomMember,
   RoomMessage,
 } from "./types.js";
@@ -39,6 +40,7 @@ export interface RoomAccess {
 export interface CreatedRoomAccess extends RoomAccess {
   inviteCode: string;
   connectorCommand: string;
+  connector: RoomConnectorInfo;
 }
 
 export type SendMessageInput =
@@ -80,6 +82,7 @@ export class RoomService {
     private readonly authenticateAccount?: (
       accessToken: string,
     ) => Promise<UserAccount>,
+    private readonly publicBaseUrl = "http://127.0.0.1:8787",
   ) {}
 
   async createRoom(input: CreateRoomInput): Promise<CreatedRoomAccess> {
@@ -109,12 +112,14 @@ export class RoomService {
       inviteCodeHash: hashSecret(inviteCode),
     });
 
+    const connector = this.connectorInfo(room.id);
     return {
       room,
       member: owner,
       accessToken,
       inviteCode,
-      connectorCommand: this.connectorCommand(room.id),
+      connectorCommand: connector.command,
+      connector,
     };
   }
 
@@ -219,24 +224,32 @@ export class RoomService {
   async rotateInviteCode(input: {
     roomId: string;
     accessToken: string;
-  }): Promise<{ inviteCode: string; connectorCommand: string }> {
-    const member = await this.authenticate(input.roomId, input.accessToken);
-    if (member.role !== "owner") {
-      throw new AppError(
-        403,
-        "OWNER_REQUIRED",
-        "Only the room owner can rotate its invite code",
-      );
-    }
+  }): Promise<{
+    inviteCode: string;
+    connectorCommand: string;
+    connector: RoomConnectorInfo;
+  }> {
+    await this.requireOwner(input.roomId, input.accessToken);
     const inviteCode = createSecret("ari", 12);
     await this.repository.updateInviteCode(
       input.roomId,
       hashSecret(inviteCode),
     );
+    const connector = this.connectorInfo(input.roomId);
     return {
       inviteCode,
-      connectorCommand: this.connectorCommand(input.roomId),
+      connectorCommand: connector.command,
+      connector,
     };
+  }
+
+  async getConnectorInfo(input: {
+    roomId: string;
+    accessToken: string;
+  }): Promise<{ connectorCommand: string; connector: RoomConnectorInfo }> {
+    await this.requireOwner(input.roomId, input.accessToken);
+    const connector = this.connectorInfo(input.roomId);
+    return { connectorCommand: connector.command, connector };
   }
 
   async listPendingDeliveries(input: {
@@ -452,8 +465,30 @@ export class RoomService {
     return this.repository.findMemberByUserId(roomId, user.id);
   }
 
-  private connectorCommand(roomId: string): string {
-    return `npx --yes @agentroom/bridge join ${roomId}`;
+  private connectorInfo(roomId: string): RoomConnectorInfo {
+    return {
+      command:
+        `npx --yes @agentroom/bridge join ${roomId}` +
+        ` --base-url ${JSON.stringify(this.publicBaseUrl)}`,
+      packageName: "@agentroom/bridge",
+      nodeVersion: ">=22",
+      supportedProviders: ["claude", "codex"],
+    };
+  }
+
+  private async requireOwner(
+    roomId: string,
+    accessToken: string,
+  ): Promise<RoomMember> {
+    const member = await this.authenticate(roomId, accessToken);
+    if (member.role !== "owner") {
+      throw new AppError(
+        403,
+        "OWNER_REQUIRED",
+        "Only the room owner can manage room connection credentials",
+      );
+    }
+    return member;
   }
 
   private async requireRoom(roomId: string): Promise<Room> {
