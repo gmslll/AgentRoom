@@ -1,24 +1,24 @@
 @import "tailwindcss";
 
 @theme {
-  /* Terminal dispatch console tokens. */
-  --color-bg: #0b0e14;
-  --color-surface: #11151d;
-  --color-surface-raised: #161c26;
-  --color-border: #1e2530;
-  --color-border-strong: #2a3342;
+  /* Terminal dispatch console — light paper palette. */
+  --color-bg: #f2f4f8;
+  --color-surface: #ffffff;
+  --color-surface-raised: #e9edf3;
+  --color-border: #dfe4ec;
+  --color-border-strong: #c9d1de;
 
-  --color-text: #e6eaf2;
-  --color-muted: #7c8598;
+  --color-text: #1a212d;
+  --color-muted: #5d6775;
 
-  --color-human: #22d3ee; /* cyan — humans */
-  --color-agent: #a78bfa; /* violet — AI agents */
-  --color-terminal: #34d399; /* green — terminals */
+  --color-human: #0e9db6; /* cyan — humans */
+  --color-agent: #7c5ce0; /* violet — AI agents */
+  --color-terminal: #0d9f73; /* green — terminals */
 
-  --color-primary: #4f8cff;
-  --color-primary-hover: #6ba0ff;
-  --color-danger: #f87171;
-  --color-warning: #fbbf24;
+  --color-primary: #2f6bff;
+  --color-primary-hover: #1f5ae8;
+  --color-danger: #e5484d;
+  --color-warning: #b45309;
 
   --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", "SF Mono",
     Menlo, Consolas, monospace;
@@ -90,18 +90,18 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #232b38;
+  background: #c6cdd9;
   border-radius: 8px;
   border: 2px solid transparent;
   background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background-color: #2f3949;
+  background-color: #aeb7c6;
 }
 
 /* Visible keyboard focus. */
 :focus-visible {
-  outline: 2px solid rgba(79, 140, 255, 0.8);
+  outline: 2px solid rgba(47, 107, 255, 0.7);
   outline-offset: 2px;
 }
 
