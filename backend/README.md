@@ -83,6 +83,13 @@ npm run build
 - `POST /v1/rooms/:roomId/members`
 - `GET /v1/rooms/:roomId/members`
 - `DELETE /v1/rooms/:roomId/members/:memberId` (owner kick, revokes token)
+- `GET /v1/rooms/:roomId/agent-access` (account-scoped ownership and authorization view)
+- `POST /v1/rooms/:roomId/agents/:agentId/claim-code` (Agent rotates its one-time claim code)
+- `POST /v1/rooms/:roomId/agents/:agentId/claim` (account member claims Agent ownership)
+- `POST/DELETE /v1/rooms/:roomId/agents/:agentId/grants[/<grantId>]` (owner delegates/revokes user dispatch)
+- `POST /v1/rooms/:roomId/agent-collaborations` (owner requests Agent-to-Agent collaboration)
+- `POST /v1/rooms/:roomId/agent-collaborations/:collaborationId/respond`
+- `DELETE /v1/rooms/:roomId/agent-collaborations/:collaborationId`
 - `POST /v1/rooms/:roomId/invite-code/rotate`
 - `GET /v1/rooms/:roomId/connector`
 - `GET /v1/rooms/:roomId/messages`
@@ -112,6 +119,15 @@ the room without preserving its one-time `art_` member token. Guest room
 creation and anonymous invite joins remain supported for local-first use.
 Registration and login have bounded in-process attempt windows; production
 multi-instance deployments still need the planned shared Redis limiter.
+
+Agent task authorization is independent from the room `owner` role. A newly
+joined Agent must first be claimed by an account-linked human member using its
+one-time claim code. That Agent's owner may then grant another account-linked
+human room member permission to dispatch it. Web `@Agent` interactions are
+serialized as `agent.task.targetMemberIds` and checked against this ownership or
+grant on every request. Agent-to-Agent tasks and reply relays require an active
+bilateral collaboration approved by both Agents' owners; either owner may
+revoke it immediately.
 
 ## Source layout
 

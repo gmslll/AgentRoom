@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: AgentRoom HTTP API
-  version: 0.9.0
+  version: 0.10.0
   description: Control and command API for AgentRoom clients and bridges.
 servers:
   - url: https://try-status.online/api
@@ -14,6 +14,7 @@ tags:
   - name: auth
   - name: rooms
   - name: messages
+  - name: agent-access
   - name: deliveries
   - name: files
   - name: moderation
@@ -488,6 +489,221 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /v1/rooms/{roomId}/agent-access:
+    parameters:
+      - $ref: "#/components/parameters/RoomId"
+    get:
+      tags: [agent-access]
+      operationId: getAgentAccess
+      description: Lists the current account's owned Agents, delegated dispatch access, grants it can manage, and collaboration requests involving its Agents.
+      security: [{ BearerAuth: [] }]
+      responses:
+        "200":
+          description: Account-scoped Agent access overview.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentAccessOverview" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/rooms/{roomId}/agents/{agentId}/claim-code:
+    parameters:
+      - $ref: "#/components/parameters/RoomId"
+      - $ref: "#/components/parameters/AgentId"
+    post:
+      tags: [agent-access]
+      operationId: rotateAgentClaimCode
+      description: Issues a new short-lived ownership claim code. Requires the unclaimed Agent's own member token.
+      security: [{ BearerAuth: [] }]
+      responses:
+        "201":
+          description: Previous claim codes were invalidated.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [agentClaim]
+                properties:
+                  agentClaim: { $ref: "#/components/schemas/AgentClaim" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/rooms/{roomId}/agents/{agentId}/claim:
+    parameters:
+      - $ref: "#/components/parameters/RoomId"
+      - $ref: "#/components/parameters/AgentId"
+    post:
+      tags: [agent-access]
+      operationId: claimAgentOwnership
+      description: Links an unclaimed room Agent to the authenticated account. The account must already be a human member of the room.
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [claimCode]
+              properties:
+                claimCode: { type: string, minLength: 12, maxLength: 100, writeOnly: true }
+      responses:
+        "201":
+          description: Agent ownership was claimed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ownership]
+                properties:
+                  ownership: { $ref: "#/components/schemas/PublicAgentOwnership" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/rooms/{roomId}/agents/{agentId}/grants:
+    parameters:
+      - $ref: "#/components/parameters/RoomId"
+      - $ref: "#/components/parameters/AgentId"
+    post:
+      tags: [agent-access]
+      operationId: grantAgentToUser
+      description: Allows an account-linked human member to dispatch this Agent, including through a structured @ mention. Requires the Agent owner's account session.
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [granteeMemberId]
+              properties:
+                granteeMemberId: { type: string, minLength: 8, maxLength: 80 }
+      responses:
+        "201":
+          description: Dispatch access granted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [grant]
+                properties:
+                  grant: { $ref: "#/components/schemas/AgentUserGrant" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/rooms/{roomId}/agents/{agentId}/grants/{grantId}:
+    parameters:
+      - $ref: "#/components/parameters/RoomId"
+      - $ref: "#/components/parameters/AgentId"
+      - in: path
+        name: grantId
+        required: true
+        schema: { type: string, minLength: 8, maxLength: 80 }
+    delete:
+      tags: [agent-access]
+      operationId: revokeAgentUserGrant
+      description: Revokes a user's dispatch access. Requires the Agent owner's account session.
+      security: [{ BearerAuth: [] }]
+      responses:
+        "204": { description: Dispatch access revoked. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/rooms/{roomId}/agent-collaborations:
+    parameters:
+      - $ref: "#/components/parameters/RoomId"
+    post:
+      tags: [agent-access]
+      operationId: requestAgentCollaboration
+      description: Requests bilateral Agent-to-Agent task access. The requester must own the source Agent; a different target owner must accept before activation.
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [requesterAgentMemberId, targetAgentMemberId]
+              properties:
+                requesterAgentMemberId: { type: string, minLength: 8, maxLength: 80 }
+                targetAgentMemberId: { type: string, minLength: 8, maxLength: 80 }
+      responses:
+        "201":
+          description: Collaboration is pending, or immediately active when one account owns both Agents.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [collaboration]
+                properties:
+                  collaboration: { $ref: "#/components/schemas/AgentCollaboration" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/rooms/{roomId}/agent-collaborations/{collaborationId}/respond:
+    parameters:
+      - $ref: "#/components/parameters/RoomId"
+      - $ref: "#/components/parameters/CollaborationId"
+    post:
+      tags: [agent-access]
+      operationId: respondToAgentCollaboration
+      description: Accepts or rejects a pending collaboration. Requires the target Agent owner's account session.
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [action]
+              properties:
+                action: { type: string, enum: [accept, reject] }
+      responses:
+        "200":
+          description: Collaboration response recorded.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [collaboration]
+                properties:
+                  collaboration: { $ref: "#/components/schemas/AgentCollaboration" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/rooms/{roomId}/agent-collaborations/{collaborationId}:
+    parameters:
+      - $ref: "#/components/parameters/RoomId"
+      - $ref: "#/components/parameters/CollaborationId"
+    delete:
+      tags: [agent-access]
+      operationId: revokeAgentCollaboration
+      description: Revokes an active collaboration or cancels a pending request. Either Agent owner may do this.
+      security: [{ BearerAuth: [] }]
+      responses:
+        "200":
+          description: Collaboration revoked.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [collaboration]
+                properties:
+                  collaboration: { $ref: "#/components/schemas/AgentCollaboration" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
   /v1/rooms/{roomId}/presence:
     parameters:
       - $ref: "#/components/parameters/RoomId"
@@ -952,6 +1168,17 @@ components:
       name: roomId
       required: true
       schema: { type: string, minLength: 8, maxLength: 80 }
+    AgentId:
+      in: path
+      name: agentId
+      required: true
+      description: Room member ID of an Agent.
+      schema: { type: string, minLength: 8, maxLength: 80 }
+    CollaborationId:
+      in: path
+      name: collaborationId
+      required: true
+      schema: { type: string, minLength: 8, maxLength: 80 }
     DeliveryId:
       in: path
       name: deliveryId
@@ -1097,6 +1324,69 @@ components:
         agentProvider: { $ref: "#/components/schemas/AgentProvider" }
         role: { type: string, enum: [owner, member] }
         joinedAt: { type: string, format: date-time }
+    AgentClaim:
+      type: object
+      required: [code, expiresAt]
+      properties:
+        code:
+          type: string
+          readOnly: true
+          description: One-time ownership claim secret shown only when issued.
+        expiresAt: { type: string, format: date-time }
+    PublicAgentOwnership:
+      type: object
+      required: [agentMemberId, claimedAt]
+      properties:
+        agentMemberId: { type: string }
+        claimedAt: { type: string, format: date-time }
+    AgentUserGrant:
+      type: object
+      required: [id, roomId, agentMemberId, granteeMemberId, createdAt]
+      properties:
+        id: { type: string }
+        roomId: { type: string }
+        agentMemberId: { type: string }
+        granteeMemberId:
+          type: string
+          description: Account-linked human room member receiving dispatch access.
+        createdAt: { type: string, format: date-time }
+    AgentCollaboration:
+      type: object
+      required:
+        [id, roomId, requesterAgentMemberId, targetAgentMemberId, status,
+         createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        roomId: { type: string }
+        requesterAgentMemberId: { type: string }
+        targetAgentMemberId: { type: string }
+        status: { type: string, enum: [pending, active, rejected, revoked] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    AgentAccessEntry:
+      type: object
+      required: [agentMemberId, ownedByMe, canDispatch]
+      properties:
+        agentMemberId: { type: string }
+        ownedByMe: { type: boolean }
+        canDispatch:
+          type: boolean
+          description: True only when the current account owns the Agent or its owner granted access.
+    AgentAccessOverview:
+      type: object
+      required: [agents, grants, collaborations]
+      properties:
+        agents:
+          type: array
+          items: { $ref: "#/components/schemas/AgentAccessEntry" }
+        grants:
+          type: array
+          description: Grants owned by or granted to the current account.
+          items: { $ref: "#/components/schemas/AgentUserGrant" }
+        collaborations:
+          type: array
+          description: Collaboration requests involving an Agent owned by the current account.
+          items: { $ref: "#/components/schemas/AgentCollaboration" }
     AccountRoomMembership:
       type: object
       required: [room, member]
@@ -1153,6 +1443,11 @@ components:
     AgentTaskInput:
       type: object
       additionalProperties: false
+      description: >-
+        Structured Agent dispatch. A web @ mention must be resolved to member IDs
+        and sent in targetMemberIds. Human senders need ownership or an explicit
+        user grant for every target. Agent senders need an active bilateral
+        collaboration with every target.
       required: [kind, text, targetMemberIds, idempotencyKey]
       properties:
         kind: { const: agent.task }
@@ -1204,6 +1499,10 @@ components:
           type: string
           readOnly: true
           description: Raw member token. The server reveals it only when issued.
+        agentClaim:
+          allOf:
+            - $ref: "#/components/schemas/AgentClaim"
+          description: Present only when a newly joined Agent needs to be claimed by an account.
     CreatedRoomAccess:
       allOf:
         - $ref: "#/components/schemas/RoomAccess"

@@ -100,6 +100,64 @@ describe("bridge lifecycle", () => {
     );
   });
 
+  it("posts structured Agent tasks with targets and idempotency", async () => {
+    const message = {
+      id: "msg_task",
+      roomId: "room_12345678",
+      sequence: 2,
+      kind: "agent.task" as const,
+      text: "Review this change",
+      attachmentIds: [],
+      targetMemberIds: ["mem_target_12345678"],
+      inReplyToMessageId: null,
+      idempotencyKey: "task_request_12345678",
+      author: {
+        memberId: "mem_sender_12345678",
+        displayName: "Codex",
+        actorType: "agent" as const,
+        agentProvider: "codex" as const,
+      },
+      createdAt: "2026-08-06T00:00:00.000Z",
+    };
+    const fetchMock = vi.fn(
+      async (_input: string | URL | Request, _init?: RequestInit) =>
+        new Response(JSON.stringify({ message, deliveries: [] }), {
+          status: 201,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new AgentRoomClient({
+      baseUrl: "https://try-status.online/api",
+      roomId: "room_12345678",
+      accessToken: "art_secret",
+      httpTimeoutMs: 100,
+      socketConnectTimeoutMs: 100,
+      recoveryIntervalMs: 100,
+    });
+
+    await expect(
+      client.sendAgentTask(
+        message.text,
+        message.targetMemberIds,
+        message.idempotencyKey,
+      ),
+    ).resolves.toEqual({ message, deliveries: [] });
+    const [url, request] = fetchMock.mock.calls[0]!;
+    expect(url).toBe(
+      "https://try-status.online/api/v1/rooms/room_12345678/messages",
+    );
+    expect(request).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({
+        kind: "agent.task",
+        text: message.text,
+        targetMemberIds: message.targetMemberIds,
+        idempotencyKey: message.idempotencyKey,
+      }),
+    });
+  });
+
   it("treats an aborted realtime listener as a clean shutdown", async () => {
     const controller = new AbortController();
     controller.abort();

@@ -13,7 +13,7 @@ import {
   receiverStatusPath,
   type ReceiverRealtimeStatus,
 } from "../receiver-status.js";
-import type { RoomMessage } from "../../protocol/rooms.js";
+import type { AgentDelivery, RoomMessage } from "../../protocol/rooms.js";
 
 export type ReceiverStatus =
   | "starting"
@@ -169,6 +169,21 @@ export class CodexMcpSupervisor {
   }): Promise<RoomMessage> {
     const client = await this.#clientFor(input.roomId, input.memberId);
     return client.sendTextMessage(input.text);
+  }
+
+  async sendAgentTask(input: {
+    roomId: string;
+    memberId: string;
+    text: string;
+    targetMemberIds: string[];
+    idempotencyKey: string;
+  }): Promise<{ message: RoomMessage; deliveries: AgentDelivery[] }> {
+    const client = await this.#clientFor(input.roomId, input.memberId);
+    return client.sendAgentTask(
+      input.text,
+      input.targetMemberIds,
+      input.idempotencyKey,
+    );
   }
 
   async close(): Promise<void> {

@@ -416,11 +416,23 @@ describe("realtime", () => {
 describe("agent task delivery", () => {
   it("targets one agent, deduplicates the task, and tracks its reply", async () => {
     const app = await makeApp();
+    const ownerAccount = (
+      await app.inject({
+        method: "POST",
+        url: "/v1/auth/register",
+        payload: {
+          email: "task-owner@example.com",
+          displayName: "Owner",
+          password: "correct horse battery staple",
+        },
+      })
+    ).json();
     const created = (
       await app.inject({
         method: "POST",
         url: "/v1/rooms",
-        payload: { name: "Agent room", displayName: "Owner" },
+        headers: { authorization: `Bearer ${ownerAccount.accessToken}` },
+        payload: { name: "Agent room" },
       })
     ).json();
     const claude = (
@@ -453,6 +465,13 @@ describe("agent task delivery", () => {
       targetMemberIds: [claude.member.id],
       idempotencyKey: "request-0001",
     };
+    const claim = await app.inject({
+      method: "POST",
+      url: `/v1/rooms/${created.room.id}/agents/${claude.member.id}/claim`,
+      headers: { authorization: `Bearer ${ownerAccount.accessToken}` },
+      payload: { claimCode: claude.agentClaim.code },
+    });
+    expect(claim.statusCode).toBe(201);
 
     const taskResponse = await app.inject({
       method: "POST",
@@ -524,19 +543,43 @@ describe("agent task delivery", () => {
     expect(noLongerPending.json().items).toHaveLength(0);
   });
 
-  it("lets an ordinary room member trigger an agent", async () => {
+  it("lets only an owner-authorized room user trigger an agent", async () => {
     const app = await makeApp();
+    const ownerAccount = (
+      await app.inject({
+        method: "POST",
+        url: "/v1/auth/register",
+        payload: {
+          email: "grant-owner@example.com",
+          displayName: "Owner",
+          password: "correct horse battery staple",
+        },
+      })
+    ).json();
+    const guestAccount = (
+      await app.inject({
+        method: "POST",
+        url: "/v1/auth/register",
+        payload: {
+          email: "grantee@example.com",
+          displayName: "Guest",
+          password: "correct horse battery staple",
+        },
+      })
+    ).json();
     const created = (
       await app.inject({
         method: "POST",
         url: "/v1/rooms",
-        payload: { displayName: "Owner" },
+        headers: { authorization: `Bearer ${ownerAccount.accessToken}` },
+        payload: {},
       })
     ).json();
     const member = (
       await app.inject({
         method: "POST",
         url: `/v1/rooms/${created.room.id}/members`,
+        headers: { authorization: `Bearer ${guestAccount.accessToken}` },
         payload: {
           inviteCode: created.inviteCode,
           displayName: "Guest",
@@ -556,6 +599,35 @@ describe("agent task delivery", () => {
         },
       })
     ).json();
+
+    const forbidden = await app.inject({
+      method: "POST",
+      url: `/v1/rooms/${created.room.id}/messages`,
+      headers: { authorization: `Bearer ${member.accessToken}` },
+      payload: {
+        kind: "agent.task",
+        text: "Run this",
+        targetMemberIds: [claude.member.id],
+        idempotencyKey: "request-before-grant-0002",
+      },
+    });
+    expect(forbidden.statusCode).toBe(403);
+    expect(forbidden.json().error.code).toBe("AGENT_ACCESS_REQUIRED");
+
+    const claim = await app.inject({
+      method: "POST",
+      url: `/v1/rooms/${created.room.id}/agents/${claude.member.id}/claim`,
+      headers: { authorization: `Bearer ${ownerAccount.accessToken}` },
+      payload: { claimCode: claude.agentClaim.code },
+    });
+    expect(claim.statusCode).toBe(201);
+    const grant = await app.inject({
+      method: "POST",
+      url: `/v1/rooms/${created.room.id}/agents/${claude.member.id}/grants`,
+      headers: { authorization: `Bearer ${ownerAccount.accessToken}` },
+      payload: { granteeMemberId: member.member.id },
+    });
+    expect(grant.statusCode).toBe(201);
 
     const response = await app.inject({
       method: "POST",

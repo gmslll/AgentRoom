@@ -64,6 +64,11 @@ describe("packaged AgentRoom CLI", () => {
         expect(help.status, help.stderr).toBe(0);
         expect(help.stdout).toContain("agentroom send --config PATH --text TEXT");
         expect(help.stdout).toContain("agentroom history --config PATH");
+        expect(help.stdout).toContain(
+          "agentroom dispatch --config PATH --targets MEMBER_ID[,MEMBER_ID]",
+        );
+        expect(help.stdout).toContain("--idempotency-key KEY --text TEXT");
+        expect(help.stdout).toContain("agentroom claim-code --config PATH");
         await mkdir(dirname(configPath), { recursive: true });
         await writeFile(
           configPath,

@@ -1,18 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { AppError } from "../../../src/lib/errors.js";
+import { hashSecret } from "../../../src/lib/secrets.js";
 import { InMemoryEventBus } from "../../../src/modules/realtime/event-bus.js";
 import { InMemoryRoomRepository } from "../../../src/modules/rooms/memory-repository.js";
 import { RoomService } from "../../../src/modules/rooms/service.js";
 
 async function setupRoom() {
+  const repository = new InMemoryRoomRepository();
   const service = new RoomService(
-    new InMemoryRoomRepository(),
+    repository,
     new InMemoryEventBus(),
   );
   const owner = await service.createRoom({
     name: "Concurrency room",
     displayName: "Owner",
-    ownerUserId: null,
+    ownerUserId: "usr_owner",
   });
   const agent = await service.joinRoom({
     roomId: owner.room.id,
@@ -21,6 +23,13 @@ async function setupRoom() {
     actorType: "agent",
     agentProvider: "codex",
     userId: null,
+  });
+  await repository.claimAgent({
+    roomId: owner.room.id,
+    agentMemberId: agent.member.id,
+    codeHash: hashSecret(agent.agentClaim!.code),
+    ownerUserId: "usr_owner",
+    claimedAt: new Date().toISOString(),
   });
   return { service, owner, agent };
 }

@@ -204,11 +204,23 @@ describeWithPostgres("PostgresRoomRepository", () => {
   it("keeps task idempotency and replies atomic under database concurrency", async () => {
     const app = await buildApp({ databaseUrl: databaseUrl! });
     await app.ready();
+    const owner = (
+      await app.inject({
+        method: "POST",
+        url: "/v1/auth/register",
+        payload: {
+          email: "task-owner@example.com",
+          displayName: "Owner",
+          password: "correct horse battery staple",
+        },
+      })
+    ).json();
     const created = (
       await app.inject({
         method: "POST",
         url: "/v1/rooms",
-        payload: { displayName: "Owner" },
+        headers: { authorization: `Bearer ${owner.accessToken}` },
+        payload: {},
       })
     ).json();
     const agent = (
@@ -223,6 +235,13 @@ describeWithPostgres("PostgresRoomRepository", () => {
         },
       })
     ).json();
+    const claim = await app.inject({
+      method: "POST",
+      url: `/v1/rooms/${created.room.id}/agents/${agent.member.id}/claim`,
+      headers: { authorization: `Bearer ${owner.accessToken}` },
+      payload: { claimCode: agent.agentClaim.code },
+    });
+    expect(claim.statusCode).toBe(201);
     const request = () =>
       app.inject({
         method: "POST",
@@ -282,6 +301,142 @@ describeWithPostgres("PostgresRoomRepository", () => {
         message.kind === "agent.reply",
       ),
     ).toHaveLength(1);
+    await app.close();
+  });
+
+  it("persists Agent ownership, delegated user access, and bilateral collaboration", async () => {
+    const app = await buildApp({ databaseUrl: databaseUrl! });
+    await app.ready();
+    const register = async (email: string, displayName: string) =>
+      (
+        await app.inject({
+          method: "POST",
+          url: "/v1/auth/register",
+          payload: {
+            email,
+            displayName,
+            password: "correct horse battery staple",
+          },
+        })
+      ).json();
+    const owner = await register("access-owner@example.com", "Owner");
+    const collaborator = await register(
+      "access-collaborator@example.com",
+      "Collaborator",
+    );
+    const room = (
+      await app.inject({
+        method: "POST",
+        url: "/v1/rooms",
+        headers: { authorization: `Bearer ${owner.accessToken}` },
+        payload: {},
+      })
+    ).json();
+    const collaboratorMember = (
+      await app.inject({
+        method: "POST",
+        url: `/v1/rooms/${room.room.id}/members`,
+        headers: { authorization: `Bearer ${collaborator.accessToken}` },
+        payload: {
+          inviteCode: room.inviteCode,
+          displayName: "Collaborator",
+          actorType: "human",
+        },
+      })
+    ).json();
+    const joinAgent = async (displayName: string) =>
+      (
+        await app.inject({
+          method: "POST",
+          url: `/v1/rooms/${room.room.id}/members`,
+          payload: {
+            inviteCode: room.inviteCode,
+            displayName,
+            actorType: "agent",
+            agentProvider: "codex",
+          },
+        })
+      ).json();
+    const agentA = await joinAgent("Agent A");
+    const agentB = await joinAgent("Agent B");
+
+    for (const [token, agent] of [
+      [owner.accessToken, agentA],
+      [collaborator.accessToken, agentB],
+    ] as const) {
+      const claimed = await app.inject({
+        method: "POST",
+        url: `/v1/rooms/${room.room.id}/agents/${agent.member.id}/claim`,
+        headers: { authorization: `Bearer ${token}` },
+        payload: { claimCode: agent.agentClaim.code },
+      });
+      expect(claimed.statusCode).toBe(201);
+    }
+
+    const grant = await app.inject({
+      method: "POST",
+      url: `/v1/rooms/${room.room.id}/agents/${agentA.member.id}/grants`,
+      headers: { authorization: `Bearer ${owner.accessToken}` },
+      payload: { granteeMemberId: collaboratorMember.member.id },
+    });
+    expect(grant.statusCode).toBe(201);
+    const delegatedTask = await app.inject({
+      method: "POST",
+      url: `/v1/rooms/${room.room.id}/messages`,
+      headers: { authorization: `Bearer ${collaborator.accessToken}` },
+      payload: {
+        kind: "agent.task",
+        text: "Delegated PostgreSQL task",
+        targetMemberIds: [agentA.member.id],
+        idempotencyKey: "postgres_delegated_task_0001",
+      },
+    });
+    expect(delegatedTask.statusCode).toBe(201);
+
+    const requested = await app.inject({
+      method: "POST",
+      url: `/v1/rooms/${room.room.id}/agent-collaborations`,
+      headers: { authorization: `Bearer ${owner.accessToken}` },
+      payload: {
+        requesterAgentMemberId: agentA.member.id,
+        targetAgentMemberId: agentB.member.id,
+      },
+    });
+    expect(requested.statusCode).toBe(201);
+    expect(requested.json().collaboration.status).toBe("pending");
+    const collaborationId = requested.json().collaboration.id;
+    const accepted = await app.inject({
+      method: "POST",
+      url: `/v1/rooms/${room.room.id}/agent-collaborations/${collaborationId}/respond`,
+      headers: { authorization: `Bearer ${collaborator.accessToken}` },
+      payload: { action: "accept" },
+    });
+    expect(accepted.statusCode).toBe(200);
+    const agentTask = await app.inject({
+      method: "POST",
+      url: `/v1/rooms/${room.room.id}/messages`,
+      headers: { authorization: `Bearer ${agentA.accessToken}` },
+      payload: {
+        kind: "agent.task",
+        text: "Authorized PostgreSQL collaboration",
+        targetMemberIds: [agentB.member.id],
+        idempotencyKey: "postgres_collaboration_0001",
+      },
+    });
+    expect(agentTask.statusCode).toBe(201);
+
+    const revokedGrant = await app.inject({
+      method: "DELETE",
+      url: `/v1/rooms/${room.room.id}/agents/${agentA.member.id}/grants/${grant.json().grant.id}`,
+      headers: { authorization: `Bearer ${owner.accessToken}` },
+    });
+    expect(revokedGrant.statusCode).toBe(204);
+    const revokedCollaboration = await app.inject({
+      method: "DELETE",
+      url: `/v1/rooms/${room.room.id}/agent-collaborations/${collaborationId}`,
+      headers: { authorization: `Bearer ${owner.accessToken}` },
+    });
+    expect(revokedCollaboration.statusCode).toBe(200);
     await app.close();
   });
 });

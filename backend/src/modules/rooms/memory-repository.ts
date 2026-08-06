@@ -2,18 +2,23 @@ import { AppError } from "../../lib/errors.js";
 import { createId } from "../../lib/secrets.js";
 import type {
   AddMemberRecord,
+  AgentClaimRecord,
   AppendMessageRecord,
+  ClaimAgentRecord,
   CreateAgentTaskRecord,
   CreateAgentTaskResult,
   CreateRoomRecord,
   ListMessagesQuery,
   ReplyToDeliveryRecord,
   RoomRepository,
+  StoredAgentUserGrant,
   UpdateDeliveryRecord,
 } from "./repository.js";
 import type {
   AccountRoomMembership,
+  AgentCollaboration,
   AgentDelivery,
+  AgentOwnership,
   ModerationRule,
   PendingAgentDelivery,
   Room,
@@ -33,11 +38,16 @@ export class InMemoryRoomRepository implements RoomRepository {
   readonly #members = new Map<string, RoomMember>();
   readonly #tokenIndex = new Map<string, string>();
   readonly #userIndex = new Map<string, string>();
+  readonly #memberUserIds = new Map<string, string>();
   readonly #messages = new Map<string, RoomMessage[]>();
   readonly #idempotencyIndex = new Map<string, string>();
   readonly #deliveries = new Map<string, AgentDelivery>();
   readonly #removedMembers = new Set<string>();
   readonly #moderationRules = new Map<string, ModerationRule>();
+  readonly #agentClaims = new Map<string, AgentClaimRecord>();
+  readonly #agentOwnerships = new Map<string, AgentOwnership>();
+  readonly #agentUserGrants = new Map<string, StoredAgentUserGrant>();
+  readonly #agentCollaborations = new Map<string, AgentCollaboration>();
 
   async createRoom(record: CreateRoomRecord): Promise<void> {
     this.#rooms.set(record.room.id, {
@@ -55,6 +65,7 @@ export class InMemoryRoomRepository implements RoomRepository {
         this.#userKey(record.room.id, record.ownerUserId),
         record.owner.id,
       );
+      this.#memberUserIds.set(record.owner.id, record.ownerUserId);
     }
     this.#messages.set(record.room.id, []);
   }
@@ -108,6 +119,26 @@ export class InMemoryRoomRepository implements RoomRepository {
         this.#userIndex.delete(key);
       }
     }
+    for (const [agentId, ownership] of this.#agentOwnerships) {
+      if (ownership.roomId === roomId) {
+        this.#agentOwnerships.delete(agentId);
+      }
+    }
+    for (const [agentId, claim] of this.#agentClaims) {
+      if (claim.roomId === roomId) {
+        this.#agentClaims.delete(agentId);
+      }
+    }
+    for (const [grantId, grant] of this.#agentUserGrants) {
+      if (grant.roomId === roomId) {
+        this.#agentUserGrants.delete(grantId);
+      }
+    }
+    for (const [collaborationId, collaboration] of this.#agentCollaborations) {
+      if (collaboration.roomId === roomId) {
+        this.#agentCollaborations.delete(collaborationId);
+      }
+    }
     return true;
   }
 
@@ -159,6 +190,10 @@ export class InMemoryRoomRepository implements RoomRepository {
         this.#userKey(record.member.roomId, record.userId),
         record.member.id,
       );
+      this.#memberUserIds.set(record.member.id, record.userId);
+    }
+    if (record.agentClaim) {
+      this.#agentClaims.set(record.member.id, record.agentClaim);
     }
   }
 
@@ -230,6 +265,202 @@ export class InMemoryRoomRepository implements RoomRepository {
     const memberId = this.#userIndex.get(this.#userKey(roomId, userId));
     const member = memberId ? this.#members.get(memberId) : undefined;
     return member && !this.#removedMembers.has(member.id) ? member : undefined;
+  }
+
+  async findUserIdByMemberId(
+    roomId: string,
+    memberId: string,
+  ): Promise<string | undefined> {
+    const member = await this.findMember(roomId, memberId);
+    return member ? this.#memberUserIds.get(memberId) : undefined;
+  }
+
+  async issueAgentClaim(record: AgentClaimRecord): Promise<void> {
+    const member = await this.findMember(record.roomId, record.agentMemberId);
+    if (!member || member.actorType !== "agent") {
+      throw new AppError(404, "AGENT_NOT_FOUND", "Agent member not found");
+    }
+    if (this.#agentOwnerships.has(record.agentMemberId)) {
+      throw new AppError(
+        409,
+        "AGENT_ALREADY_OWNED",
+        "The agent already has an owner",
+      );
+    }
+    this.#agentClaims.set(record.agentMemberId, record);
+  }
+
+  async claimAgent(record: ClaimAgentRecord): Promise<AgentOwnership> {
+    const member = await this.findMember(record.roomId, record.agentMemberId);
+    const claim = this.#agentClaims.get(record.agentMemberId);
+    if (!member || member.actorType !== "agent") {
+      throw new AppError(404, "AGENT_NOT_FOUND", "Agent member not found");
+    }
+    if (this.#agentOwnerships.has(record.agentMemberId)) {
+      throw new AppError(
+        409,
+        "AGENT_ALREADY_OWNED",
+        "The agent already has an owner",
+      );
+    }
+    if (
+      !claim ||
+      claim.roomId !== record.roomId ||
+      claim.codeHash !== record.codeHash ||
+      claim.expiresAt <= record.claimedAt
+    ) {
+      throw new AppError(
+        400,
+        "INVALID_AGENT_CLAIM",
+        "The agent claim code is invalid or expired",
+      );
+    }
+    const ownership: AgentOwnership = {
+      roomId: record.roomId,
+      agentMemberId: record.agentMemberId,
+      ownerUserId: record.ownerUserId,
+      claimedAt: record.claimedAt,
+    };
+    this.#agentOwnerships.set(record.agentMemberId, ownership);
+    this.#agentClaims.delete(record.agentMemberId);
+    return ownership;
+  }
+
+  async findAgentOwnership(
+    roomId: string,
+    agentMemberId: string,
+  ): Promise<AgentOwnership | undefined> {
+    const ownership = this.#agentOwnerships.get(agentMemberId);
+    return ownership?.roomId === roomId ? ownership : undefined;
+  }
+
+  async listAgentOwnerships(roomId: string): Promise<AgentOwnership[]> {
+    return [...this.#agentOwnerships.values()].filter(
+      (ownership) => ownership.roomId === roomId,
+    );
+  }
+
+  async hasAgentUserGrant(
+    roomId: string,
+    agentMemberId: string,
+    granteeUserId: string,
+  ): Promise<boolean> {
+    return [...this.#agentUserGrants.values()].some(
+      (grant) =>
+        grant.roomId === roomId &&
+        grant.agentMemberId === agentMemberId &&
+        grant.granteeUserId === granteeUserId,
+    );
+  }
+
+  async createAgentUserGrant(
+    record: StoredAgentUserGrant,
+  ): Promise<StoredAgentUserGrant> {
+    if (await this.hasAgentUserGrant(
+      record.roomId,
+      record.agentMemberId,
+      record.granteeUserId,
+    )) {
+      throw new AppError(
+        409,
+        "AGENT_GRANT_EXISTS",
+        "This user can already dispatch the agent",
+      );
+    }
+    this.#agentUserGrants.set(record.id, record);
+    return record;
+  }
+
+  async listAgentUserGrants(roomId: string): Promise<StoredAgentUserGrant[]> {
+    return [...this.#agentUserGrants.values()].filter(
+      (grant) => grant.roomId === roomId,
+    );
+  }
+
+  async deleteAgentUserGrant(
+    roomId: string,
+    grantId: string,
+    agentMemberId: string,
+  ): Promise<boolean> {
+    const grant = this.#agentUserGrants.get(grantId);
+    if (
+      !grant ||
+      grant.roomId !== roomId ||
+      grant.agentMemberId !== agentMemberId
+    ) {
+      return false;
+    }
+    return this.#agentUserGrants.delete(grantId);
+  }
+
+  async createAgentCollaboration(
+    collaboration: AgentCollaboration,
+  ): Promise<AgentCollaboration> {
+    if (
+      [...this.#agentCollaborations.values()].some(
+        (existing) =>
+          existing.roomId === collaboration.roomId &&
+          ["pending", "active"].includes(existing.status) &&
+          sameAgentPair(existing, collaboration),
+      )
+    ) {
+      throw new AppError(
+        409,
+        "AGENT_COLLABORATION_EXISTS",
+        "These agents already have an open collaboration",
+      );
+    }
+    this.#agentCollaborations.set(collaboration.id, collaboration);
+    return collaboration;
+  }
+
+  async listAgentCollaborations(roomId: string): Promise<AgentCollaboration[]> {
+    return [...this.#agentCollaborations.values()]
+      .filter((collaboration) => collaboration.roomId === roomId)
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  }
+
+  async updateAgentCollaboration(
+    roomId: string,
+    collaborationId: string,
+    allowedFrom: AgentCollaboration["status"][],
+    status: AgentCollaboration["status"],
+    updatedAt: string,
+  ): Promise<AgentCollaboration> {
+    const collaboration = this.#agentCollaborations.get(collaborationId);
+    if (!collaboration || collaboration.roomId !== roomId) {
+      throw new AppError(
+        404,
+        "AGENT_COLLABORATION_NOT_FOUND",
+        "Agent collaboration not found",
+      );
+    }
+    if (!allowedFrom.includes(collaboration.status)) {
+      throw new AppError(
+        409,
+        "INVALID_COLLABORATION_TRANSITION",
+        `Collaboration cannot transition from ${collaboration.status} to ${status}`,
+      );
+    }
+    const updated = { ...collaboration, status, updatedAt };
+    this.#agentCollaborations.set(collaboration.id, updated);
+    return updated;
+  }
+
+  async hasActiveAgentCollaboration(
+    roomId: string,
+    firstAgentMemberId: string,
+    secondAgentMemberId: string,
+  ): Promise<boolean> {
+    return [...this.#agentCollaborations.values()].some(
+      (collaboration) =>
+        collaboration.roomId === roomId &&
+        collaboration.status === "active" &&
+        sameAgentPair(collaboration, {
+          requesterAgentMemberId: firstAgentMemberId,
+          targetAgentMemberId: secondAgentMemberId,
+        }),
+    );
   }
 
   async appendMessage(record: AppendMessageRecord): Promise<RoomMessage> {
@@ -486,6 +717,7 @@ export class InMemoryRoomRepository implements RoomRepository {
     if (!member || member.roomId !== roomId || member.role === "owner") {
       return false;
     }
+    const removedUserId = this.#memberUserIds.get(memberId);
     this.#removedMembers.add(memberId);
     for (const [key, id] of this.#tokenIndex) {
       if (id === memberId) {
@@ -495,6 +727,25 @@ export class InMemoryRoomRepository implements RoomRepository {
     for (const [key, id] of this.#userIndex) {
       if (id === memberId) {
         this.#userIndex.delete(key);
+      }
+    }
+    this.#memberUserIds.delete(memberId);
+    this.#agentClaims.delete(memberId);
+    this.#agentOwnerships.delete(memberId);
+    for (const [grantId, grant] of this.#agentUserGrants) {
+      if (
+        grant.agentMemberId === memberId ||
+        (removedUserId !== undefined && grant.granteeUserId === removedUserId)
+      ) {
+        this.#agentUserGrants.delete(grantId);
+      }
+    }
+    for (const [collaborationId, collaboration] of this.#agentCollaborations) {
+      if (
+        collaboration.requesterAgentMemberId === memberId ||
+        collaboration.targetAgentMemberId === memberId
+      ) {
+        this.#agentCollaborations.delete(collaborationId);
       }
     }
     void at;
@@ -554,5 +805,23 @@ function sameStrings(left: string[], right: string[]): boolean {
   return (
     left.length === right.length &&
     left.every((value, index) => value === right[index])
+  );
+}
+
+function sameAgentPair(
+  left: Pick<
+    AgentCollaboration,
+    "requesterAgentMemberId" | "targetAgentMemberId"
+  >,
+  right: Pick<
+    AgentCollaboration,
+    "requesterAgentMemberId" | "targetAgentMemberId"
+  >,
+): boolean {
+  return (
+    (left.requesterAgentMemberId === right.requesterAgentMemberId &&
+      left.targetAgentMemberId === right.targetAgentMemberId) ||
+    (left.requesterAgentMemberId === right.targetAgentMemberId &&
+      left.targetAgentMemberId === right.requesterAgentMemberId)
   );
 }

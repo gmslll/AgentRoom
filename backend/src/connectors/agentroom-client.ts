@@ -1,5 +1,6 @@
 import WebSocket from "ws";
 import type {
+  AgentClaim,
   AgentDelivery,
   PendingAgentDelivery,
   RealtimeServerEvent,
@@ -69,6 +70,33 @@ export class AgentRoomClient {
       },
     );
     return body.message;
+  }
+
+  async sendAgentTask(
+    text: string,
+    targetMemberIds: string[],
+    idempotencyKey: string,
+  ): Promise<{ message: RoomMessage; deliveries: AgentDelivery[] }> {
+    return this.request(
+      `/v1/rooms/${encodeURIComponent(this.config.roomId)}/messages`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          kind: "agent.task",
+          text,
+          targetMemberIds,
+          idempotencyKey,
+        }),
+      },
+    );
+  }
+
+  async issueAgentClaimCode(agentMemberId: string): Promise<AgentClaim> {
+    const body = await this.request<{ agentClaim: AgentClaim }>(
+      `/v1/rooms/${encodeURIComponent(this.config.roomId)}/agents/${encodeURIComponent(agentMemberId)}/claim-code`,
+      { method: "POST" },
+    );
+    return body.agentClaim;
   }
 
   async updateDelivery(

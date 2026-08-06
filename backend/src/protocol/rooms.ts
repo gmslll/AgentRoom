@@ -23,6 +23,54 @@ export interface RoomMember {
   joinedAt: string;
 }
 
+export interface AgentClaim {
+  code: string;
+  expiresAt: string;
+}
+
+export interface AgentOwnership {
+  roomId: string;
+  agentMemberId: string;
+  ownerUserId: string;
+  claimedAt: string;
+}
+
+export interface AgentUserGrant {
+  id: string;
+  roomId: string;
+  agentMemberId: string;
+  granteeMemberId: string;
+  createdAt: string;
+}
+
+export type AgentCollaborationStatus =
+  | "pending"
+  | "active"
+  | "rejected"
+  | "revoked";
+
+export interface AgentCollaboration {
+  id: string;
+  roomId: string;
+  requesterAgentMemberId: string;
+  targetAgentMemberId: string;
+  status: AgentCollaborationStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AgentAccessEntry {
+  agentMemberId: string;
+  ownedByMe: boolean;
+  canDispatch: boolean;
+}
+
+export interface AgentAccessOverview {
+  agents: AgentAccessEntry[];
+  grants: AgentUserGrant[];
+  collaborations: AgentCollaboration[];
+}
+
 export interface AccountRoomMembership {
   room: Room;
   member: RoomMember;

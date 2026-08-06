@@ -61,7 +61,7 @@ declare const __AGENTROOM_CLI_DOWNLOAD_BASE__: string;
 const cliVersion =
   typeof __AGENTROOM_CLI_VERSION__ === "string"
     ? __AGENTROOM_CLI_VERSION__
-    : "0.4.1-dev";
+    : "0.5.0-dev";
 const cliDownloadBase =
   typeof __AGENTROOM_CLI_DOWNLOAD_BASE__ === "string"
     ? __AGENTROOM_CLI_DOWNLOAD_BASE__
@@ -86,6 +86,10 @@ try {
     await sendRoomMessage(args);
   } else if (command === "history") {
     await printRoomHistory(args);
+  } else if (command === "dispatch") {
+    await dispatchAgentTask(args);
+  } else if (command === "claim-code") {
+    await issueAgentClaimCode(args);
   } else if (command === "update") {
     await updateCli(args);
   } else if (command === "version" || command === "--version") {
@@ -185,6 +189,7 @@ async function joinRoom(args: string[], attach: boolean): Promise<void> {
     }
     const accessToken = requiredNestedString(body, "accessToken");
     const memberId = requiredNestedString(body, "member", "id");
+    const agentClaim = optionalObject(body, "agentClaim");
     const safeRoomId = roomId.replaceAll(/[^a-zA-Z0-9_-]/g, "_");
     const configPath = resolve(
       option(args, "--config") ??
@@ -242,6 +247,16 @@ async function joinRoom(args: string[], attach: boolean): Promise<void> {
     });
 
     console.log(`Joined AgentRoom as ${displayName} (${memberId}).`);
+    if (provider && agentClaim) {
+      const claimCode = optionalString(agentClaim, "code");
+      const expiresAt = optionalString(agentClaim, "expiresAt");
+      if (claimCode && expiresAt) {
+        console.log(`Agent ownership claim code: ${claimCode}`);
+        console.log(
+          `Claim this Agent from a signed-in room account before ${expiresAt}.`,
+        );
+      }
+    }
     console.log(`Private bridge config written to ${configPath}`);
     const localCli = localCliInvocation();
     const runCommand = commandLine(localCli.command, [
@@ -387,9 +402,58 @@ async function printRoomHistory(args: string[]): Promise<void> {
   console.log(JSON.stringify(history, null, 2));
 }
 
+async function dispatchAgentTask(args: string[]): Promise<void> {
+  const text = option(args, "--text");
+  const targets = option(args, "--targets")
+    ?.split(",")
+    .map((target) => target.trim())
+    .filter(Boolean);
+  const idempotencyKey = option(args, "--idempotency-key");
+  if (!text?.trim() || text.length > 8_000) {
+    throw new Error(
+      "--text is required and must be between 1 and 8000 characters",
+    );
+  }
+  if (!targets?.length || targets.length > 10) {
+    throw new Error("--targets requires 1 to 10 comma-separated Agent member IDs");
+  }
+  if (
+    !idempotencyKey ||
+    idempotencyKey.length < 8 ||
+    idempotencyKey.length > 100
+  ) {
+    throw new Error("--idempotency-key must be between 8 and 100 characters");
+  }
+  const { client } = await configuredClient(args);
+  const result = await client.sendAgentTask(
+    text,
+    [...new Set(targets)],
+    idempotencyKey,
+  );
+  console.log(JSON.stringify(result, null, 2));
+}
+
+async function issueAgentClaimCode(args: string[]): Promise<void> {
+  const { client, config } = await configuredClient(args);
+  if (!config.memberId) {
+    throw new Error(
+      "The bridge config has no memberId; join the room again before issuing an Agent claim code",
+    );
+  }
+  const agentClaim = await client.issueAgentClaimCode(config.memberId);
+  console.log(`Agent ownership claim code: ${agentClaim.code}`);
+  console.log(
+    `Claim this Agent from a signed-in room account before ${agentClaim.expiresAt}.`,
+  );
+}
+
 async function configuredClient(
   args: string[],
-): Promise<{ client: AgentRoomClient; configPath: string }> {
+): Promise<{
+  client: AgentRoomClient;
+  config: StoredBridgeConfig;
+  configPath: string;
+}> {
   const configPath = option(args, "--config") ?? positional(args, 0);
   if (!configPath) {
     throw new Error("--config is required");
@@ -404,6 +468,7 @@ async function configuredClient(
       : config.accessToken;
   return {
     configPath: resolvedConfigPath,
+    config,
     client: new AgentRoomClient({
       baseUrl: config.baseUrl,
       roomId: config.roomId,
@@ -1109,6 +1174,26 @@ function requiredNestedString(
   return candidate;
 }
 
+function optionalObject(
+  value: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> | undefined {
+  const candidate = value[key];
+  return typeof candidate === "object" &&
+    candidate !== null &&
+    !Array.isArray(candidate)
+    ? (candidate as Record<string, unknown>)
+    : undefined;
+}
+
+function optionalString(
+  value: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  const candidate = value[key];
+  return typeof candidate === "string" && candidate ? candidate : undefined;
+}
+
 function apiError(body: Record<string, unknown>, status: number): string {
   const error = body.error as Record<string, unknown> | undefined;
   return typeof error?.message === "string"
@@ -1132,6 +1217,9 @@ Usage:
   agentroom start --config PATH [--no-launch]
   agentroom send --config PATH --text TEXT
   agentroom history --config PATH [--after-sequence N] [--limit 1..200]
+  agentroom dispatch --config PATH --targets MEMBER_ID[,MEMBER_ID]
+                     --idempotency-key KEY --text TEXT
+  agentroom claim-code --config PATH
   agentroom run --config PATH
   agentroom mcp [--workspace PATH]
   agentroom configure --config PATH

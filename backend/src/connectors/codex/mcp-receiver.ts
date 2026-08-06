@@ -17,7 +17,7 @@ const supervisor = new CodexMcpSupervisor({
   cli: localCliInvocation(),
 });
 const mcp = new Server(
-  { name: "agentroom-receiver", version: "0.4.1" },
+  { name: "agentroom-receiver", version: "0.5.0" },
   {
     capabilities: { tools: {} },
     instructions:
@@ -25,6 +25,7 @@ const mcp = new Server(
       "When the session was started through AgentRoom, targeted room tasks execute in the same Remote TUI thread and appear in the visible Codex CLI. " +
       "Use agentroom_receiver_status to diagnose room connectivity; realtimeStatus=connected is authoritative, while processStatus only describes the local process. " +
       "Use agentroom_history to read ordinary room chat and agentroom_send to proactively post an ordinary text message. " +
+      "Use agentroom_dispatch only when an Agent owner-approved collaboration allows this Agent to target another Agent. " +
       "Normal room chat messages never start an agent task. Never read private .agentroom bridge configs or expose member tokens.",
   },
 );
@@ -82,6 +83,34 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
         required: ["room_id", "member_id", "text"],
       },
     },
+    {
+      name: "agentroom_dispatch",
+      description:
+        "Dispatch a targeted Agent task; the server requires an owner-approved collaboration for Agent-to-Agent use",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          room_id: { type: "string", minLength: 1 },
+          member_id: { type: "string", minLength: 1 },
+          text: { type: "string", minLength: 1, maxLength: 8_000 },
+          target_member_ids: {
+            type: "array",
+            minItems: 1,
+            maxItems: 10,
+            items: { type: "string", minLength: 1 },
+          },
+          idempotency_key: { type: "string", minLength: 8, maxLength: 100 },
+        },
+        required: [
+          "room_id",
+          "member_id",
+          "text",
+          "target_member_ids",
+          "idempotency_key",
+        ],
+      },
+    },
   ],
 }));
 
@@ -107,6 +136,20 @@ mcp.setRequestHandler(CallToolRequestSchema, async (request) => {
       text,
     });
     return toolJson({ message });
+  }
+  if (request.params.name === "agentroom_dispatch") {
+    const text = requiredString(args, "text");
+    if (text.length > 8_000) {
+      throw new Error("text must be at most 8000 characters");
+    }
+    const result = await supervisor.sendAgentTask({
+      roomId: requiredString(args, "room_id"),
+      memberId: requiredString(args, "member_id"),
+      text,
+      targetMemberIds: requiredStringArray(args, "target_member_ids", 10),
+      idempotencyKey: requiredString(args, "idempotency_key"),
+    });
+    return toolJson(result);
   }
   if (request.params.name === "agentroom_receiver_rescan") {
     await supervisor.scan();
@@ -176,6 +219,23 @@ function boundedInteger(
     );
   }
   return value as number;
+}
+
+function requiredStringArray(
+  args: Record<string, unknown>,
+  key: string,
+  maximum: number,
+): string[] {
+  const value = args[key];
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    value.length > maximum ||
+    value.some((item) => typeof item !== "string" || !item.trim())
+  ) {
+    throw new Error(`${key} must contain between 1 and ${maximum} strings`);
+  }
+  return [...new Set(value as string[])];
 }
 
 function toolJson(value: unknown) {

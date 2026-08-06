@@ -4,7 +4,11 @@ import type { EventBus } from "../realtime/event-bus.js";
 import type { AppendMessageRecord, RoomRepository } from "./repository.js";
 import type {
   AccountRoomMembership,
+  AgentAccessOverview,
+  AgentClaim,
+  AgentCollaboration,
   AgentDelivery,
+  AgentOwnership,
   AgentProvider,
   ActorType,
   DeliveryStatus,
@@ -16,6 +20,7 @@ import type {
   RoomMember,
   RoomMessage,
   RoomVisibility,
+  AgentUserGrant,
 } from "./types.js";
 import type { UserAccount } from "../auth/types.js";
 
@@ -39,6 +44,7 @@ export interface RoomAccess {
   room: Room;
   member: RoomMember;
   accessToken: string;
+  agentClaim?: AgentClaim;
 }
 
 export interface CreatedRoomAccess extends RoomAccess {
@@ -90,6 +96,8 @@ const allowedDeliverySources: Record<
   running: ["queued", "received", "running"],
   failed: ["queued", "received", "running", "failed"],
 };
+
+const agentClaimTtlMs = 30 * 60_000;
 
 export interface RoomServiceOptions {
   validateAttachments?: (
@@ -187,11 +195,34 @@ export class RoomService {
       joinedAt: this.now().toISOString(),
     };
     const accessToken = createSecret("art");
+    const claimCode =
+      input.actorType === "agent" ? createSecret("arc", 12) : undefined;
+    const claimCreatedAt = this.now().toISOString();
+    const agentClaim = claimCode
+      ? {
+          code: claimCode,
+          expiresAt: new Date(
+            new Date(claimCreatedAt).getTime() + agentClaimTtlMs,
+          ).toISOString(),
+        }
+      : undefined;
 
     await this.repository.addMember({
       member,
       userId: input.userId,
       tokenHash: hashSecret(accessToken),
+      ...(agentClaim
+        ? {
+            agentClaim: {
+              id: createId("acm"),
+              roomId: room.id,
+              agentMemberId: member.id,
+              codeHash: hashSecret(agentClaim.code),
+              expiresAt: agentClaim.expiresAt,
+              createdAt: claimCreatedAt,
+            },
+          }
+        : {}),
     });
 
     this.#publish({
@@ -203,7 +234,12 @@ export class RoomService {
       data: { member },
     });
 
-    return { room, member, accessToken };
+    return {
+      room,
+      member,
+      accessToken,
+      ...(agentClaim ? { agentClaim } : {}),
+    };
   }
 
   async authenticate(roomId: string, accessToken: string): Promise<RoomMember> {
@@ -291,7 +327,7 @@ export class RoomService {
     const member = await this.authenticate(input.roomId, input.accessToken);
 
     if (input.kind === "agent.task") {
-      return this.sendAgentTask(input, member, false);
+      return this.sendAgentTask(input, member);
     }
 
     const message = await this.appendMessage({
@@ -324,6 +360,316 @@ export class RoomService {
   }): Promise<RoomMember[]> {
     await this.authenticate(input.roomId, input.accessToken);
     return this.repository.listMembers(input.roomId);
+  }
+
+  async reissueAgentClaim(input: {
+    roomId: string;
+    agentMemberId: string;
+    accessToken: string;
+  }): Promise<AgentClaim> {
+    const member = await this.authenticate(input.roomId, input.accessToken);
+    if (
+      member.id !== input.agentMemberId ||
+      member.actorType !== "agent"
+    ) {
+      throw new AppError(
+        403,
+        "AGENT_SELF_REQUIRED",
+        "Only the agent itself can rotate its claim code",
+      );
+    }
+    const claim = this.#newAgentClaim();
+    await this.repository.issueAgentClaim({
+      id: createId("acm"),
+      roomId: input.roomId,
+      agentMemberId: input.agentMemberId,
+      codeHash: hashSecret(claim.code),
+      expiresAt: claim.expiresAt,
+      createdAt: this.now().toISOString(),
+    });
+    return claim;
+  }
+
+  async claimAgent(input: {
+    roomId: string;
+    agentMemberId: string;
+    accessToken: string;
+    claimCode: string;
+  }): Promise<{ agentMemberId: string; claimedAt: string }> {
+    const { user } = await this.#requireAccountMember(
+      input.roomId,
+      input.accessToken,
+    );
+    const target = await this.repository.findMember(
+      input.roomId,
+      input.agentMemberId,
+    );
+    if (!target || target.actorType !== "agent") {
+      throw new AppError(404, "AGENT_NOT_FOUND", "Agent member not found");
+    }
+    const claimedAt = this.now().toISOString();
+    const ownership = await this.repository.claimAgent({
+      roomId: input.roomId,
+      agentMemberId: input.agentMemberId,
+      codeHash: hashSecret(input.claimCode),
+      ownerUserId: user.id,
+      claimedAt,
+    });
+    return {
+      agentMemberId: ownership.agentMemberId,
+      claimedAt: ownership.claimedAt,
+    };
+  }
+
+  async getAgentAccess(input: {
+    roomId: string;
+    accessToken: string;
+  }): Promise<AgentAccessOverview> {
+    const { user } = await this.#requireAccountMember(
+      input.roomId,
+      input.accessToken,
+    );
+    const [members, ownerships, storedGrants, collaborations] =
+      await Promise.all([
+        this.repository.listMembers(input.roomId),
+        this.repository.listAgentOwnerships(input.roomId),
+        this.repository.listAgentUserGrants(input.roomId),
+        this.repository.listAgentCollaborations(input.roomId),
+      ]);
+    const ownershipByAgent = new Map(
+      ownerships.map((ownership) => [ownership.agentMemberId, ownership]),
+    );
+    const grants: AgentUserGrant[] = [];
+    for (const grant of storedGrants) {
+      const ownership = ownershipByAgent.get(grant.agentMemberId);
+      if (
+        ownership?.ownerUserId !== user.id &&
+        grant.granteeUserId !== user.id
+      ) {
+        continue;
+      }
+      const grantee = await this.repository.findMemberByUserId(
+        input.roomId,
+        grant.granteeUserId,
+      );
+      if (grantee) {
+        grants.push({
+          id: grant.id,
+          roomId: grant.roomId,
+          agentMemberId: grant.agentMemberId,
+          granteeMemberId: grantee.id,
+          createdAt: grant.createdAt,
+        });
+      }
+    }
+    const ownedAgentIds = new Set(
+      ownerships
+        .filter((ownership) => ownership.ownerUserId === user.id)
+        .map((ownership) => ownership.agentMemberId),
+    );
+    return {
+      agents: await Promise.all(
+        members
+          .filter((member) => member.actorType === "agent")
+          .map(async (agent) => ({
+            agentMemberId: agent.id,
+            ownedByMe: ownedAgentIds.has(agent.id),
+            canDispatch:
+              ownedAgentIds.has(agent.id) ||
+              (await this.repository.hasAgentUserGrant(
+                input.roomId,
+                agent.id,
+                user.id,
+              )),
+          })),
+      ),
+      grants,
+      collaborations: collaborations.filter(
+        (collaboration) =>
+          ownedAgentIds.has(collaboration.requesterAgentMemberId) ||
+          ownedAgentIds.has(collaboration.targetAgentMemberId),
+      ),
+    };
+  }
+
+  async grantAgentToUser(input: {
+    roomId: string;
+    agentMemberId: string;
+    granteeMemberId: string;
+    accessToken: string;
+  }): Promise<AgentUserGrant> {
+    const { user } = await this.#requireAccountMember(
+      input.roomId,
+      input.accessToken,
+    );
+    await this.#requireOwnedAgent(input.roomId, input.agentMemberId, user.id);
+    const grantee = await this.repository.findMember(
+      input.roomId,
+      input.granteeMemberId,
+    );
+    const granteeUserId = grantee
+      ? await this.repository.findUserIdByMemberId(
+          input.roomId,
+          grantee.id,
+        )
+      : undefined;
+    if (!grantee || grantee.actorType !== "human" || !granteeUserId) {
+      throw new AppError(
+        400,
+        "ACCOUNT_MEMBER_REQUIRED",
+        "Agent access can only be granted to an account-linked human member",
+      );
+    }
+    if (granteeUserId === user.id) {
+      throw new AppError(
+        409,
+        "AGENT_OWNER_ALREADY_ALLOWED",
+        "The agent owner already has dispatch access",
+      );
+    }
+    const stored = await this.repository.createAgentUserGrant({
+      id: createId("agr"),
+      roomId: input.roomId,
+      agentMemberId: input.agentMemberId,
+      granteeUserId,
+      createdAt: this.now().toISOString(),
+    });
+    return {
+      id: stored.id,
+      roomId: stored.roomId,
+      agentMemberId: stored.agentMemberId,
+      granteeMemberId: grantee.id,
+      createdAt: stored.createdAt,
+    };
+  }
+
+  async revokeAgentUserGrant(input: {
+    roomId: string;
+    agentMemberId: string;
+    grantId: string;
+    accessToken: string;
+  }): Promise<void> {
+    const { user } = await this.#requireAccountMember(
+      input.roomId,
+      input.accessToken,
+    );
+    await this.#requireOwnedAgent(input.roomId, input.agentMemberId, user.id);
+    const removed = await this.repository.deleteAgentUserGrant(
+      input.roomId,
+      input.grantId,
+      input.agentMemberId,
+    );
+    if (!removed) {
+      throw new AppError(404, "AGENT_GRANT_NOT_FOUND", "Agent grant not found");
+    }
+  }
+
+  async requestAgentCollaboration(input: {
+    roomId: string;
+    requesterAgentMemberId: string;
+    targetAgentMemberId: string;
+    accessToken: string;
+  }): Promise<AgentCollaboration> {
+    const { user } = await this.#requireAccountMember(
+      input.roomId,
+      input.accessToken,
+    );
+    if (input.requesterAgentMemberId === input.targetAgentMemberId) {
+      throw new AppError(
+        400,
+        "INVALID_AGENT_COLLABORATION",
+        "An agent cannot collaborate with itself",
+      );
+    }
+    await this.#requireOwnedAgent(
+      input.roomId,
+      input.requesterAgentMemberId,
+      user.id,
+    );
+    const targetOwnership = await this.#requireOwnedAgent(
+      input.roomId,
+      input.targetAgentMemberId,
+    );
+    const createdAt = this.now().toISOString();
+    return this.repository.createAgentCollaboration({
+      id: createId("col"),
+      roomId: input.roomId,
+      requesterAgentMemberId: input.requesterAgentMemberId,
+      targetAgentMemberId: input.targetAgentMemberId,
+      status: targetOwnership.ownerUserId === user.id ? "active" : "pending",
+      createdAt,
+      updatedAt: createdAt,
+    });
+  }
+
+  async respondToAgentCollaboration(input: {
+    roomId: string;
+    collaborationId: string;
+    accessToken: string;
+    accept: boolean;
+  }): Promise<AgentCollaboration> {
+    const { user } = await this.#requireAccountMember(
+      input.roomId,
+      input.accessToken,
+    );
+    const collaboration = await this.#findCollaboration(
+      input.roomId,
+      input.collaborationId,
+    );
+    await this.#requireOwnedAgent(
+      input.roomId,
+      collaboration.targetAgentMemberId,
+      user.id,
+    );
+    return this.repository.updateAgentCollaboration(
+      input.roomId,
+      input.collaborationId,
+      ["pending"],
+      input.accept ? "active" : "rejected",
+      this.now().toISOString(),
+    );
+  }
+
+  async revokeAgentCollaboration(input: {
+    roomId: string;
+    collaborationId: string;
+    accessToken: string;
+  }): Promise<AgentCollaboration> {
+    const { user } = await this.#requireAccountMember(
+      input.roomId,
+      input.accessToken,
+    );
+    const collaboration = await this.#findCollaboration(
+      input.roomId,
+      input.collaborationId,
+    );
+    const [requesterOwner, targetOwner] = await Promise.all([
+      this.#requireOwnedAgent(
+        input.roomId,
+        collaboration.requesterAgentMemberId,
+      ),
+      this.#requireOwnedAgent(
+        input.roomId,
+        collaboration.targetAgentMemberId,
+      ),
+    ]);
+    if (
+      requesterOwner.ownerUserId !== user.id &&
+      targetOwner.ownerUserId !== user.id
+    ) {
+      throw new AppError(
+        403,
+        "AGENT_OWNER_REQUIRED",
+        "Only either agent owner can revoke this collaboration",
+      );
+    }
+    return this.repository.updateAgentCollaboration(
+      input.roomId,
+      input.collaborationId,
+      ["pending", "active"],
+      "revoked",
+      this.now().toISOString(),
+    );
   }
 
   /** True when the member still belongs to the room and was not removed. */
@@ -469,7 +815,6 @@ export class RoomService {
           idempotencyKey: input.relay.idempotencyKey,
         },
         member,
-        true,
       );
     }
 
@@ -519,21 +864,7 @@ export class RoomService {
   private async sendAgentTask(
     input: Extract<SendMessageInput, { kind: "agent.task" }>,
     member: RoomMember,
-    allowAgentRelay: boolean,
   ): Promise<SendMessageResult> {
-    // Any room member (human, terminal, or owner) may trigger agents.
-    // Agent members must go through the explicit relay path so replies do
-    // not self-trigger new tasks; the UI never exposes dispatch to agents.
-    const allowed =
-      member.actorType === "agent" ? allowAgentRelay : true;
-    if (!allowed) {
-      throw new AppError(
-        403,
-        "AGENT_TRIGGER_FORBIDDEN",
-        "Agent members can only trigger via explicit relay",
-      );
-    }
-
     const targetMemberIds = [...new Set(input.targetMemberIds)].sort();
     if (targetMemberIds.length === 0 || targetMemberIds.length > 10) {
       throw new AppError(
@@ -555,6 +886,11 @@ export class RoomService {
           `Target ${targetMemberId} is not an agent in this room`,
         );
       }
+      await this.#requireAgentDispatchAccess(
+        input.roomId,
+        member,
+        targetMemberId,
+      );
     }
 
     const result = await this.repository.createAgentTask({
@@ -787,6 +1123,147 @@ export class RoomService {
       nodeVersion: ">=22",
       supportedProviders: ["claude", "codex"],
     };
+  }
+
+  #newAgentClaim(): AgentClaim {
+    const createdAt = this.now().getTime();
+    return {
+      code: createSecret("arc", 12),
+      expiresAt: new Date(createdAt + agentClaimTtlMs).toISOString(),
+    };
+  }
+
+  async #requireAccountMember(
+    roomId: string,
+    accessToken: string,
+  ): Promise<{ user: UserAccount; member: RoomMember }> {
+    if (!this.authenticateAccount || !accessToken.startsWith("ars_")) {
+      throw new AppError(
+        401,
+        "ACCOUNT_SESSION_REQUIRED",
+        "An account session is required for Agent access management",
+      );
+    }
+    const user = await this.authenticateAccount(accessToken);
+    const member = await this.repository.findMemberByUserId(roomId, user.id);
+    if (!member) {
+      throw new AppError(
+        403,
+        "ACCOUNT_ROOM_MEMBERSHIP_REQUIRED",
+        "The account must be an active member of this room",
+      );
+    }
+    return { user, member };
+  }
+
+  async #requireOwnedAgent(
+    roomId: string,
+    agentMemberId: string,
+    expectedOwnerUserId?: string,
+  ): Promise<AgentOwnership> {
+    const agent = await this.repository.findMember(roomId, agentMemberId);
+    if (!agent || agent.actorType !== "agent") {
+      throw new AppError(404, "AGENT_NOT_FOUND", "Agent member not found");
+    }
+    const ownership = await this.repository.findAgentOwnership(
+      roomId,
+      agentMemberId,
+    );
+    if (!ownership) {
+      throw new AppError(
+        409,
+        "AGENT_UNCLAIMED",
+        "The agent must be claimed by an account before it can be authorized",
+      );
+    }
+    if (
+      expectedOwnerUserId !== undefined &&
+      ownership.ownerUserId !== expectedOwnerUserId
+    ) {
+      throw new AppError(
+        403,
+        "AGENT_OWNER_REQUIRED",
+        "Only the agent owner can manage its access",
+      );
+    }
+    return ownership;
+  }
+
+  async #findCollaboration(
+    roomId: string,
+    collaborationId: string,
+  ): Promise<AgentCollaboration> {
+    const collaboration = (await this.repository.listAgentCollaborations(
+      roomId,
+    )).find((item) => item.id === collaborationId);
+    if (!collaboration) {
+      throw new AppError(
+        404,
+        "AGENT_COLLABORATION_NOT_FOUND",
+        "Agent collaboration not found",
+      );
+    }
+    return collaboration;
+  }
+
+  async #requireAgentDispatchAccess(
+    roomId: string,
+    sender: RoomMember,
+    targetAgentMemberId: string,
+  ): Promise<void> {
+    if (sender.actorType === "agent") {
+      if (sender.id === targetAgentMemberId) {
+        throw new AppError(
+          400,
+          "AGENT_SELF_TRIGGER_FORBIDDEN",
+          "An agent cannot dispatch a task to itself",
+        );
+      }
+      if (
+        !(await this.repository.hasActiveAgentCollaboration(
+          roomId,
+          sender.id,
+          targetAgentMemberId,
+        ))
+      ) {
+        throw new AppError(
+          403,
+          "AGENT_COLLABORATION_REQUIRED",
+          "The agent owners must approve collaboration before these agents can exchange tasks",
+        );
+      }
+      return;
+    }
+
+    const senderUserId = await this.repository.findUserIdByMemberId(
+      roomId,
+      sender.id,
+    );
+    if (!senderUserId) {
+      throw new AppError(
+        403,
+        "AGENT_ACCESS_REQUIRED",
+        "An account-linked user with Agent access is required to dispatch this task",
+      );
+    }
+    const ownership = await this.repository.findAgentOwnership(
+      roomId,
+      targetAgentMemberId,
+    );
+    const allowed =
+      ownership?.ownerUserId === senderUserId ||
+      (await this.repository.hasAgentUserGrant(
+        roomId,
+        targetAgentMemberId,
+        senderUserId,
+      ));
+    if (!allowed) {
+      throw new AppError(
+        403,
+        "AGENT_ACCESS_REQUIRED",
+        "The agent owner has not authorized this user to dispatch tasks",
+      );
+    }
   }
 
   private async requireOwner(

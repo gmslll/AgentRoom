@@ -134,9 +134,11 @@ owner 丢失邀请码时按钮显示「生成新邀请码」，调用
 - 「从结果再派发」：AI 回复上提供「转派给…」操作，预填上下文、选择新目标，
   实现人类编排的接力（当前协议内实现，不触发自动接力）。
 
-## 8. AI 任务派发（仅 owner）
+## 8. AI 任务派发（Agent 所有权授权）
 
-- 当前只有房间 owner 可以发 `agent.task`；非 owner 界面隐藏任务派发能力。
+- 本段原 owner-only 规则已被 contract v0.10.0 取代。前端以
+  `GET /v1/rooms/{roomId}/agent-access` 的 `canDispatch` 为准；用户必须拥有目标
+  Agent，或得到 Agent 所有者明确授权，房间角色不构成 Agent 权限。
 - 入口：输入框旁「派发任务」按钮 + 成员面板中每个 agent 的「派发任务」操作。
 - 目标选择器多选 agent 成员（去重后最多 10 个）。
 - 稳定幂等键：前端第一次点击时生成（UUID），网络重试复用同一键，成功后清除。
@@ -149,7 +151,7 @@ owner 丢失邀请码时按钮显示「生成新邀请码」，调用
 - 成员按类型分组：人类 / Agent（Claude · Codex · other）/ 终端。
 - agent 成员带 provider 徽标（Claude/Codex 品牌标识）。
 - 成员只表示「已加入」不表示在线（无 presence 心跳接口），前端不显示绿色在线点。
-- owner 视角：每个 agent 有「派发任务」操作。
+- 当前账号对 `canDispatch: true` 的 agent 显示「派发任务」操作。
 - `GET /v1/rooms/{roomId}/members` 拉取 + `member.joined` 实时增量。
 
 ## 10. 错误处理

@@ -41,15 +41,40 @@ hash check automatically, then relay stdio to the verified replacement before
 starting the room receiver.
 
 Normal `text` messages never start an agent. An explicit `agent.task` names one
-or more agent member IDs and creates a delivery for each target. Bridges recover
-pending deliveries over HTTP and receive `delivery.queued` in realtime.
+or more agent member IDs and creates a delivery for each target. A human account
+may target only an Agent it owns or one whose owner explicitly granted that
+account dispatch access. An Agent may target another Agent only while their
+owners have an active bilateral collaboration. Bridges recover pending
+deliveries over HTTP and receive `delivery.queued` in realtime.
 Authenticated clients discover target IDs through `GET
 /v1/rooms/{roomId}/members`; active WebSocket clients also receive
 `member.joined` when a new human, terminal, or agent joins, `member.removed`
 when the owner kicks a member, and `member.presence` when a member's online
 state changes.
 
-## Newer capabilities (contract v0.9.0)
+## Agent access (contract v0.10.0)
+
+- Every newly joined Agent receives a short-lived, one-time `agentClaim`. An
+  account-linked human room member claims ownership with
+  `POST /v1/rooms/{roomId}/agents/{agentId}/claim`. The Agent itself can rotate
+  an unused code through `.../claim-code`; the CLI exposes this as
+  `agentroom update` followed by `agentroom claim-code --config PATH` for
+  Agents created before v0.5.0. Raw
+  codes are never listed later and historical Agents are not assigned to the
+  room owner automatically.
+- `GET /v1/rooms/{roomId}/agent-access` returns `ownedByMe` and `canDispatch`
+  for each Agent. Web clients must use this result to build the visual `@Agent`
+  picker, then submit the selected member IDs as a normal structured
+  `agent.task`; display names are never authorization identifiers.
+- An Agent owner grants or revokes one account-linked human member under
+  `.../agents/{agentId}/grants`. Room membership alone does not authorize an
+  `@Agent` task.
+- Cross-user Agent collaboration is bilateral: the source owner requests, the
+  target owner accepts or rejects, and either owner can revoke. An active pair
+  permits Agent-to-Agent tasks in both directions; pending/rejected/revoked
+  pairs do not.
+
+## Other capabilities (contract v0.9.0)
 
 - **Files**: `POST /v1/rooms/{roomId}/files/upload-intents` returns a
   short-lived presigned PUT URL; clients upload bytes directly to S3-compatible
@@ -72,7 +97,8 @@ state changes.
   with `#access_token=...&expires_at=...`.
 - **AI relay**: `POST .../deliveries/{deliveryId}/reply` accepts an optional
   `relay` object; when present, a new `agent.task` authored by the replying
-  agent is created for the relay targets (agent-to-agent hand-off).
+  agent is created for the relay targets (agent-to-agent hand-off). The same
+  active-collaboration authorization is enforced.
 - **Moderation**: owners manage per-room `flag`/`reject` substring rules under
   `/v1/rooms/{roomId}/moderation/rules`. Flagged messages carry
   `moderation: { state: "flagged", reason }`; rejected sends return 403.

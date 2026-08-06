@@ -171,7 +171,7 @@ function registerRoomTools(
     "room_send_task",
     {
       description:
-        "Creates an agent.task targeting one or more agent members. Requires the room owner token.",
+        "Creates an agent.task. Human callers need owner-issued Agent access; Agent callers need an active owner-approved collaboration.",
       inputSchema: {
         roomId,
         text: z.string().min(1).max(8_000),

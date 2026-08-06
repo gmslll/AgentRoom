@@ -307,6 +307,27 @@ describe("room management extensions", () => {
     const agentA = await joinAgent(app, room.room.id, room.inviteCode, "Claude A");
     const agentB = await joinAgent(app, room.room.id, room.inviteCode, "Codex B");
 
+    for (const agent of [agentA, agentB]) {
+      const claim = await app.inject({
+        method: "POST",
+        url: `/v1/rooms/${room.room.id}/agents/${agent.member.id}/claim`,
+        headers: { authorization: `Bearer ${owner.accessToken}` },
+        payload: { claimCode: agent.agentClaim.code },
+      });
+      expect(claim.statusCode).toBe(201);
+    }
+    const collaboration = await app.inject({
+      method: "POST",
+      url: `/v1/rooms/${room.room.id}/agent-collaborations`,
+      headers: { authorization: `Bearer ${owner.accessToken}` },
+      payload: {
+        requesterAgentMemberId: agentA.member.id,
+        targetAgentMemberId: agentB.member.id,
+      },
+    });
+    expect(collaboration.statusCode).toBe(201);
+    expect(collaboration.json().collaboration.status).toBe("active");
+
     const task = await app.inject({
       method: "POST",
       url: `/v1/rooms/${room.room.id}/messages`,
@@ -349,6 +370,254 @@ describe("room management extensions", () => {
     });
     expect(pending.json().items).toHaveLength(1);
     expect(pending.json().items[0].task.text).toBe("Schema designed; handing off to Codex");
+  });
+
+  it("requires user grants and bilateral approval for cross-user Agent work", async () => {
+    const app = await makeApp();
+    const owner = await registerOwner(app);
+    const collaborator = (
+      await app.inject({
+        method: "POST",
+        url: "/v1/auth/register",
+        payload: {
+          email: "collaborator@example.com",
+          displayName: "Collaborator",
+          password: "correct horse battery staple",
+        },
+      })
+    ).json();
+    const room = await createRoom(app, owner.accessToken);
+    const collaboratorMember = (
+      await app.inject({
+        method: "POST",
+        url: `/v1/rooms/${room.room.id}/members`,
+        headers: { authorization: `Bearer ${collaborator.accessToken}` },
+        payload: {
+          inviteCode: room.inviteCode,
+          displayName: "Collaborator",
+          actorType: "human",
+        },
+      })
+    ).json();
+    const agentA = await joinAgent(app, room.room.id, room.inviteCode, "Agent A");
+    const agentB = await joinAgent(app, room.room.id, room.inviteCode, "Agent B");
+
+    for (const [accountToken, agent] of [
+      [owner.accessToken, agentA],
+      [collaborator.accessToken, agentB],
+    ] as const) {
+      const claim = await app.inject({
+        method: "POST",
+        url: `/v1/rooms/${room.room.id}/agents/${agent.member.id}/claim`,
+        headers: { authorization: `Bearer ${accountToken}` },
+        payload: { claimCode: agent.agentClaim.code },
+      });
+      expect(claim.statusCode).toBe(201);
+    }
+
+    const unauthorizedMention = await app.inject({
+      method: "POST",
+      url: `/v1/rooms/${room.room.id}/messages`,
+      headers: { authorization: `Bearer ${collaborator.accessToken}` },
+      payload: {
+        kind: "agent.task",
+        text: "@Agent A inspect this",
+        targetMemberIds: [agentA.member.id],
+        idempotencyKey: "mention_before_grant_0001",
+      },
+    });
+    expect(unauthorizedMention.statusCode).toBe(403);
+    expect(unauthorizedMention.json().error.code).toBe("AGENT_ACCESS_REQUIRED");
+
+    const grant = await app.inject({
+      method: "POST",
+      url: `/v1/rooms/${room.room.id}/agents/${agentA.member.id}/grants`,
+      headers: { authorization: `Bearer ${owner.accessToken}` },
+      payload: { granteeMemberId: collaboratorMember.member.id },
+    });
+    expect(grant.statusCode).toBe(201);
+    const authorizedMention = await app.inject({
+      method: "POST",
+      url: `/v1/rooms/${room.room.id}/messages`,
+      headers: { authorization: `Bearer ${collaborator.accessToken}` },
+      payload: {
+        kind: "agent.task",
+        text: "@Agent A inspect this",
+        targetMemberIds: [agentA.member.id],
+        idempotencyKey: "mention_after_grant_0001",
+      },
+    });
+    expect(authorizedMention.statusCode).toBe(201);
+
+    const request = await app.inject({
+      method: "POST",
+      url: `/v1/rooms/${room.room.id}/agent-collaborations`,
+      headers: { authorization: `Bearer ${owner.accessToken}` },
+      payload: {
+        requesterAgentMemberId: agentA.member.id,
+        targetAgentMemberId: agentB.member.id,
+      },
+    });
+    expect(request.statusCode).toBe(201);
+    const collaboration = request.json().collaboration;
+    expect(collaboration.status).toBe("pending");
+
+    const beforeApproval = await app.inject({
+      method: "POST",
+      url: `/v1/rooms/${room.room.id}/messages`,
+      headers: { authorization: `Bearer ${agentA.accessToken}` },
+      payload: {
+        kind: "agent.task",
+        text: "Work together",
+        targetMemberIds: [agentB.member.id],
+        idempotencyKey: "collab_before_accept_0001",
+      },
+    });
+    expect(beforeApproval.statusCode).toBe(403);
+    expect(beforeApproval.json().error.code).toBe(
+      "AGENT_COLLABORATION_REQUIRED",
+    );
+
+    const accepted = await app.inject({
+      method: "POST",
+      url: `/v1/rooms/${room.room.id}/agent-collaborations/${collaboration.id}/respond`,
+      headers: { authorization: `Bearer ${collaborator.accessToken}` },
+      payload: { action: "accept" },
+    });
+    expect(accepted.statusCode).toBe(200);
+    expect(accepted.json().collaboration.status).toBe("active");
+
+    for (const [sender, target, key] of [
+      [agentA, agentB, "collab_a_to_b_0001"],
+      [agentB, agentA, "collab_b_to_a_0001"],
+    ] as const) {
+      const dispatched = await app.inject({
+        method: "POST",
+        url: `/v1/rooms/${room.room.id}/messages`,
+        headers: { authorization: `Bearer ${sender.accessToken}` },
+        payload: {
+          kind: "agent.task",
+          text: "Authorized collaboration task",
+          targetMemberIds: [target.member.id],
+          idempotencyKey: key,
+        },
+      });
+      expect(dispatched.statusCode).toBe(201);
+    }
+
+    const revoked = await app.inject({
+      method: "DELETE",
+      url: `/v1/rooms/${room.room.id}/agent-collaborations/${collaboration.id}`,
+      headers: { authorization: `Bearer ${collaborator.accessToken}` },
+    });
+    expect(revoked.statusCode).toBe(200);
+    expect(revoked.json().collaboration.status).toBe("revoked");
+
+    const afterCollaborationRevocation = await app.inject({
+      method: "POST",
+      url: `/v1/rooms/${room.room.id}/messages`,
+      headers: { authorization: `Bearer ${agentA.accessToken}` },
+      payload: {
+        kind: "agent.task",
+        text: "This collaboration was revoked",
+        targetMemberIds: [agentB.member.id],
+        idempotencyKey: "collab_after_revoke_0001",
+      },
+    });
+    expect(afterCollaborationRevocation.statusCode).toBe(403);
+    expect(afterCollaborationRevocation.json().error.code).toBe(
+      "AGENT_COLLABORATION_REQUIRED",
+    );
+
+    const access = await app.inject({
+      method: "GET",
+      url: `/v1/rooms/${room.room.id}/agent-access`,
+      headers: { authorization: `Bearer ${collaborator.accessToken}` },
+    });
+    expect(access.statusCode).toBe(200);
+    expect(access.json().agents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          agentMemberId: agentA.member.id,
+          canDispatch: true,
+          ownedByMe: false,
+        }),
+        expect.objectContaining({
+          agentMemberId: agentB.member.id,
+          canDispatch: true,
+          ownedByMe: true,
+        }),
+      ]),
+    );
+
+    const grantId = grant.json().grant.id;
+    const revokedGrant = await app.inject({
+      method: "DELETE",
+      url: `/v1/rooms/${room.room.id}/agents/${agentA.member.id}/grants/${grantId}`,
+      headers: { authorization: `Bearer ${owner.accessToken}` },
+    });
+    expect(revokedGrant.statusCode).toBe(204);
+
+    const afterGrantRevocation = await app.inject({
+      method: "POST",
+      url: `/v1/rooms/${room.room.id}/messages`,
+      headers: { authorization: `Bearer ${collaborator.accessToken}` },
+      payload: {
+        kind: "agent.task",
+        text: "@Agent A should no longer run this",
+        targetMemberIds: [agentA.member.id],
+        idempotencyKey: "mention_after_revoke_0001",
+      },
+    });
+    expect(afterGrantRevocation.statusCode).toBe(403);
+    expect(afterGrantRevocation.json().error.code).toBe(
+      "AGENT_ACCESS_REQUIRED",
+    );
+  });
+
+  it("rotates one-time Agent claim codes without assigning historical Agents to the room owner", async () => {
+    const app = await makeApp();
+    const owner = await registerOwner(app);
+    const room = await createRoom(app, owner.accessToken);
+    const agent = await joinAgent(
+      app,
+      room.room.id,
+      room.inviteCode,
+      "Historical Agent",
+    );
+
+    const rotated = await app.inject({
+      method: "POST",
+      url: `/v1/rooms/${room.room.id}/agents/${agent.member.id}/claim-code`,
+      headers: { authorization: `Bearer ${agent.accessToken}` },
+    });
+    expect(rotated.statusCode).toBe(201);
+    expect(rotated.json().agentClaim.code).not.toBe(agent.agentClaim.code);
+
+    const oldCode = await app.inject({
+      method: "POST",
+      url: `/v1/rooms/${room.room.id}/agents/${agent.member.id}/claim`,
+      headers: { authorization: `Bearer ${owner.accessToken}` },
+      payload: { claimCode: agent.agentClaim.code },
+    });
+    expect(oldCode.statusCode).toBe(400);
+    expect(oldCode.json().error.code).toBe("INVALID_AGENT_CLAIM");
+
+    const claimed = await app.inject({
+      method: "POST",
+      url: `/v1/rooms/${room.room.id}/agents/${agent.member.id}/claim`,
+      headers: { authorization: `Bearer ${owner.accessToken}` },
+      payload: { claimCode: rotated.json().agentClaim.code },
+    });
+    expect(claimed.statusCode).toBe(201);
+
+    const rotatedAfterClaim = await app.inject({
+      method: "POST",
+      url: `/v1/rooms/${room.room.id}/agents/${agent.member.id}/claim-code`,
+      headers: { authorization: `Bearer ${agent.accessToken}` },
+    });
+    expect(rotatedAfterClaim.statusCode).toBe(409);
+    expect(rotatedAfterClaim.json().error.code).toBe("AGENT_ALREADY_OWNED");
   });
 
   it("exposes presence and reports members as offline without sockets", async () => {

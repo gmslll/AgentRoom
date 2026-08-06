@@ -1,6 +1,8 @@
 import type {
   AccountRoomMembership,
+  AgentCollaboration,
   AgentDelivery,
+  AgentOwnership,
   DeliveryStatus,
   ModerationRule,
   PendingAgentDelivery,
@@ -21,6 +23,32 @@ export interface AddMemberRecord {
   member: RoomMember;
   userId: string | null;
   tokenHash: string;
+  agentClaim?: AgentClaimRecord;
+}
+
+export interface AgentClaimRecord {
+  id: string;
+  roomId: string;
+  agentMemberId: string;
+  codeHash: string;
+  expiresAt: string;
+  createdAt: string;
+}
+
+export interface ClaimAgentRecord {
+  roomId: string;
+  agentMemberId: string;
+  codeHash: string;
+  ownerUserId: string;
+  claimedAt: string;
+}
+
+export interface StoredAgentUserGrant {
+  id: string;
+  roomId: string;
+  agentMemberId: string;
+  granteeUserId: string;
+  createdAt: string;
 }
 
 export interface AppendMessageRecord {
@@ -109,6 +137,47 @@ export interface RoomRepository {
     roomId: string,
     userId: string,
   ): Promise<RoomMember | undefined>;
+  findUserIdByMemberId(
+    roomId: string,
+    memberId: string,
+  ): Promise<string | undefined>;
+  issueAgentClaim(record: AgentClaimRecord): Promise<void>;
+  claimAgent(record: ClaimAgentRecord): Promise<AgentOwnership>;
+  findAgentOwnership(
+    roomId: string,
+    agentMemberId: string,
+  ): Promise<AgentOwnership | undefined>;
+  listAgentOwnerships(roomId: string): Promise<AgentOwnership[]>;
+  hasAgentUserGrant(
+    roomId: string,
+    agentMemberId: string,
+    granteeUserId: string,
+  ): Promise<boolean>;
+  createAgentUserGrant(
+    record: StoredAgentUserGrant,
+  ): Promise<StoredAgentUserGrant>;
+  listAgentUserGrants(roomId: string): Promise<StoredAgentUserGrant[]>;
+  deleteAgentUserGrant(
+    roomId: string,
+    grantId: string,
+    agentMemberId: string,
+  ): Promise<boolean>;
+  createAgentCollaboration(
+    collaboration: AgentCollaboration,
+  ): Promise<AgentCollaboration>;
+  listAgentCollaborations(roomId: string): Promise<AgentCollaboration[]>;
+  updateAgentCollaboration(
+    roomId: string,
+    collaborationId: string,
+    allowedFrom: AgentCollaboration["status"][],
+    status: AgentCollaboration["status"],
+    updatedAt: string,
+  ): Promise<AgentCollaboration>;
+  hasActiveAgentCollaboration(
+    roomId: string,
+    firstAgentMemberId: string,
+    secondAgentMemberId: string,
+  ): Promise<boolean>;
   appendMessage(record: AppendMessageRecord): Promise<RoomMessage>;
   findMessage(roomId: string, messageId: string): Promise<RoomMessage | undefined>;
   listMessages(query: ListMessagesQuery): Promise<RoomMessage[]>;

@@ -12,6 +12,19 @@
 
 ## 现在需要调整
 
+- 接入 `GET /v1/rooms/{roomId}/agent-access`。`@Agent` 做成成员选择器，只展示
+  `canDispatch: true` 的 Agent；提交现有 `agent.task`，将选择结果写入
+  `targetMemberIds`。不要解析正文昵称，也不要认为 room owner 自动拥有所有 Agent。
+- Agent 首次加入后提供“领取 Agent”流程：账号已是房间 human 成员时，用 CLI 显示的
+  一次性 `agentClaim.code` 调用 `POST .../agents/{agentId}/claim`。历史 Agent 提示在
+  本机先运行 `agentroom update`，再运行
+  `agentroom claim-code --config "<完整配置路径>"`，不要默认归给房主。
+- Agent 所有者提供用户授权管理：`POST .../agents/{agentId}/grants` 选择另一个
+  账号绑定的 human 成员；`DELETE .../grants/{grantId}` 撤销。撤权后立即刷新
+  `agent-access` 并从 @ 选择器移除。
+- 提供 Agent 协作申请、接受/拒绝和撤销：源所有者发起，目标所有者审批；只有
+  `active` 表示两个 Agent 可双向派发。状态以 `agent-access.collaborations` 为准。
+
 - `Room` 增加 `visibility: "private" | "public"`。创建时可选择；owner 通过
   `PATCH /v1/rooms/{roomId}` 改名或切换公开性。
 - 接入 `GET /v1/public-rooms`。公开房间可省略 `inviteCode`；私有房间

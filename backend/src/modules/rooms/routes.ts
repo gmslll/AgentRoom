@@ -128,6 +128,54 @@ const MemberParams = Type.Object(
   { additionalProperties: false },
 );
 
+const AgentGrantParams = Type.Object(
+  {
+    roomId: Type.String({ minLength: 8, maxLength: 80 }),
+    agentId: Type.String({ minLength: 8, maxLength: 80 }),
+    grantId: Type.String({ minLength: 8, maxLength: 80 }),
+  },
+  { additionalProperties: false },
+);
+
+const AgentParams = Type.Object(
+  {
+    roomId: Type.String({ minLength: 8, maxLength: 80 }),
+    agentId: Type.String({ minLength: 8, maxLength: 80 }),
+  },
+  { additionalProperties: false },
+);
+
+const ClaimAgentBody = Type.Object(
+  { claimCode: Type.String({ minLength: 12, maxLength: 100 }) },
+  { additionalProperties: false },
+);
+
+const CreateAgentGrantBody = Type.Object(
+  { granteeMemberId: Type.String({ minLength: 8, maxLength: 80 }) },
+  { additionalProperties: false },
+);
+
+const CreateCollaborationBody = Type.Object(
+  {
+    requesterAgentMemberId: Type.String({ minLength: 8, maxLength: 80 }),
+    targetAgentMemberId: Type.String({ minLength: 8, maxLength: 80 }),
+  },
+  { additionalProperties: false },
+);
+
+const CollaborationParams = Type.Object(
+  {
+    roomId: Type.String({ minLength: 8, maxLength: 80 }),
+    collaborationId: Type.String({ minLength: 8, maxLength: 80 }),
+  },
+  { additionalProperties: false },
+);
+
+const RespondCollaborationBody = Type.Object(
+  { action: Type.Union([Type.Literal("accept"), Type.Literal("reject")]) },
+  { additionalProperties: false },
+);
+
 const RuleParams = Type.Object(
   {
     roomId: Type.String({ minLength: 8, maxLength: 80 }),
@@ -290,6 +338,122 @@ export function registerRoomRoutes(
     async (request) => ({
       items: await roomService.listMembers({
         roomId: request.params.roomId,
+        accessToken: readBearerToken(request.headers.authorization),
+      }),
+    }),
+  );
+
+  app.get<{ Params: Static<typeof RoomParams> }>(
+    "/v1/rooms/:roomId/agent-access",
+    { schema: { params: RoomParams } },
+    async (request) =>
+      roomService.getAgentAccess({
+        roomId: request.params.roomId,
+        accessToken: readBearerToken(request.headers.authorization),
+      }),
+  );
+
+  app.post<{ Params: Static<typeof AgentParams> }>(
+    "/v1/rooms/:roomId/agents/:agentId/claim-code",
+    { schema: { params: AgentParams } },
+    async (request, reply) =>
+      reply.status(201).send({
+        agentClaim: await roomService.reissueAgentClaim({
+          roomId: request.params.roomId,
+          agentMemberId: request.params.agentId,
+          accessToken: readBearerToken(request.headers.authorization),
+        }),
+      }),
+  );
+
+  app.post<{
+    Params: Static<typeof AgentParams>;
+    Body: Static<typeof ClaimAgentBody>;
+  }>(
+    "/v1/rooms/:roomId/agents/:agentId/claim",
+    { schema: { params: AgentParams, body: ClaimAgentBody } },
+    async (request, reply) =>
+      reply.status(201).send({
+        ownership: await roomService.claimAgent({
+          roomId: request.params.roomId,
+          agentMemberId: request.params.agentId,
+          accessToken: readBearerToken(request.headers.authorization),
+          claimCode: request.body.claimCode,
+        }),
+      }),
+  );
+
+  app.post<{
+    Params: Static<typeof AgentParams>;
+    Body: Static<typeof CreateAgentGrantBody>;
+  }>(
+    "/v1/rooms/:roomId/agents/:agentId/grants",
+    { schema: { params: AgentParams, body: CreateAgentGrantBody } },
+    async (request, reply) =>
+      reply.status(201).send({
+        grant: await roomService.grantAgentToUser({
+          roomId: request.params.roomId,
+          agentMemberId: request.params.agentId,
+          granteeMemberId: request.body.granteeMemberId,
+          accessToken: readBearerToken(request.headers.authorization),
+        }),
+      }),
+  );
+
+  app.delete<{ Params: Static<typeof AgentGrantParams> }>(
+    "/v1/rooms/:roomId/agents/:agentId/grants/:grantId",
+    { schema: { params: AgentGrantParams } },
+    async (request, reply) => {
+      await roomService.revokeAgentUserGrant({
+        roomId: request.params.roomId,
+        agentMemberId: request.params.agentId,
+        grantId: request.params.grantId,
+        accessToken: readBearerToken(request.headers.authorization),
+      });
+      return reply.status(204).send();
+    },
+  );
+
+  app.post<{
+    Body: Static<typeof CreateCollaborationBody>;
+    Params: Static<typeof RoomParams>;
+  }>(
+    "/v1/rooms/:roomId/agent-collaborations",
+    { schema: { params: RoomParams, body: CreateCollaborationBody } },
+    async (request, reply) =>
+      reply.status(201).send({
+        collaboration: await roomService.requestAgentCollaboration({
+          roomId: request.params.roomId,
+          requesterAgentMemberId: request.body.requesterAgentMemberId,
+          targetAgentMemberId: request.body.targetAgentMemberId,
+          accessToken: readBearerToken(request.headers.authorization),
+        }),
+      }),
+  );
+
+  app.post<{
+    Params: Static<typeof CollaborationParams>;
+    Body: Static<typeof RespondCollaborationBody>;
+  }>(
+    "/v1/rooms/:roomId/agent-collaborations/:collaborationId/respond",
+    { schema: { params: CollaborationParams, body: RespondCollaborationBody } },
+    async (request) => ({
+      collaboration: await roomService.respondToAgentCollaboration({
+        roomId: request.params.roomId,
+        collaborationId: request.params.collaborationId,
+        accessToken: readBearerToken(request.headers.authorization),
+        accept: request.body.action === "accept",
+      }),
+    }),
+  );
+
+  app.delete<{ Params: Static<typeof CollaborationParams> }>(
+    "/v1/rooms/:roomId/agent-collaborations/:collaborationId",
+    { schema: { params: CollaborationParams } },
+    async (request) => ({
+      collaboration: await roomService.revokeAgentCollaboration({
+        roomId: request.params.roomId,
+        collaborationId: request.params.collaborationId,
         accessToken: readBearerToken(request.headers.authorization),
       }),
     }),

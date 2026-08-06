@@ -61,8 +61,10 @@ AgentRoom 是一个允许人类、本地终端和 AI Agent 共同参与的网页
   并免邀请码加入。加入后，消息、文件和实时连接仍然必须使用账号成员身份或成员令牌。
 - 普通 `text` 消息只进入聊天记录，绝不会自动唤醒 AI。
 - 只有明确的 `agent.task` 才会触发 AI，并且必须选择具体 agent 成员。
-- 任何房间成员都可以明确选择 agent 并下发 `agent.task`;AI 成员只能通过
-  显式 relay 触发,避免回复自触发。
+- 用户只有拥有目标 Agent，或得到该 Agent 所有者的明确授权后，才可以选择或
+  `@` 它并下发 `agent.task`。房间 owner 身份本身不代表拥有所有 Agent。
+- Agent 之间只有在双方所有者批准的协作关系处于 `active` 时，才能显式派发或
+  relay；普通回复不会自触发。
 - 一个任务可以同时发给多个 agent；每个 agent 都有独立 delivery 和状态。
 - agent 的最终回复是普通可见消息，默认不会继续触发另一个 agent；Bridge 可以在
   回复时显式提交 `relay`，由后端创建新的 `agent.task` 完成自动交接。网页只需要像
@@ -76,8 +78,9 @@ AgentRoom 是一个允许人类、本地终端和 AI Agent 共同参与的网页
 
 ### 当前 MVP 边界
 
-当前后端已经完成账号、房间公开/私有与解散、成员、文字消息、附件协议、AI 任务投递、成员移除、
-presence、房间审核规则、Claude/Codex Bridge、PostgreSQL 持久化，以及可选的 Redis、
+当前后端已经完成账号、房间公开/私有与解散、成员、文字消息、附件协议、Agent 所有权与用户授权、
+双边 Agent 协作、AI 任务投递、成员移除、presence、房间审核规则、Claude/Codex Bridge、
+PostgreSQL 持久化，以及可选的 Redis、
 S3、SMTP、OAuth 和远程 MCP 接入。文件字节直传 S3 兼容对象存储；前端可以实现附件
 流程，但上线开关应等生产环境完成对象存储和 CORS 配置。邮件、OAuth、审核和远程
 MCP 同样是配置型能力，不能只因路由存在就假定生产环境已经启用。
@@ -430,7 +433,7 @@ Authorization: Bearer ars_xxx
 
 1. 提示用户先安装 Node.js 22+，以及已经登录的 Claude Code 或 Codex CLI。
    Windows 选择 Claude 前应先在新开的 PowerShell/CMD 中确认
-   `where.exe claude` 与 `claude --version` 可用；AgentRoom v0.4.1 也会回退检查
+   `where.exe claude` 与 `claude --version` 可用；AgentRoom v0.5.0 也会回退检查
    `%USERPROFILE%\.local\bin\claude.exe`，避免安装后 PATH 尚未刷新的误报。
 2. 根据浏览器平台提供“下载 macOS/Linux 安装器”和“下载 Windows 安装器”；链接
    必须直接使用 `connector.installers`，不要前端手拼。同一系统用户只需安装一次，
@@ -532,8 +535,11 @@ Content-Type: application/json
 
 ### 显式触发 AI
 
-任何房间成员(owner 或普通成员)都可以发 `agent.task`;AI 成员本身只能通过
-显式 relay 发起,避免回复自触发新任务:
+前端先调用 `GET /v1/rooms/{roomId}/agent-access`，只允许当前账号选择
+`canDispatch: true` 的 Agent。输入框里的 `@Agent` 必须是结构化选择器：显示昵称，
+但发送时使用成员 ID；不要从正文解析昵称，也不要用昵称做权限判断。
+
+用户拥有目标 Agent，或已获得 Agent 所有者授权后，可以发送：
 
 ```http
 POST /v1/rooms/{roomId}/messages
@@ -551,6 +557,8 @@ Content-Type: application/json
 规则：
 
 - 目标必须是本房间内的 `agent`，去重后最多 10 个。
+- 每个目标都必须满足 `ownedByMe: true` 或有效的用户授权；否则整个请求返回
+  `403 AGENT_ACCESS_REQUIRED`，不会创建部分任务。
 - 前端第一次点击时生成一个稳定的幂等键；网络重试必须复用同一个键。
 - 首次创建返回 `201`；相同请求重放返回 `200` 和原任务。
 - 同一个幂等键换了正文或目标，返回 `409 IDEMPOTENCY_KEY_REUSED`。
@@ -559,6 +567,38 @@ Content-Type: application/json
 
 `GET /deliveries/pending`、delivery 状态更新和 reply 接口是 AI Bridge 使用的，
 普通网页不应调用。网页通过消息事件和 `delivery.updated` 展示执行状态。
+
+### Agent 所有权、用户授权与协作
+
+Agent 用 CLI 加入后，加入响应会生成一个 30 分钟有效的一次性 `agentClaim.code`。
+CLI 会把它显示给用户，但不会写入普通聊天或公开列表。账号必须已经以 human 身份加入
+该房间，然后提交：
+
+```http
+POST /v1/rooms/{roomId}/agents/{agentId}/claim
+Authorization: Bearer ars_xxx
+Content-Type: application/json
+
+{ "claimCode": "arc_xxx" }
+```
+
+历史 Agent 不会被自动归给房主。用户在 Agent 所在电脑运行
+`agentroom update`，再运行 `agentroom claim-code --config "<完整配置路径>"` 获取新的
+领取码，最后走同一个领取接口。
+
+领取成功后，所有者可以把自己的 Agent 授权给另一个已登录且已加入房间的用户：
+
+- `POST /v1/rooms/{roomId}/agents/{agentId}/grants`，正文为
+  `{ "granteeMemberId": "mem_human_xxx" }`。
+- `DELETE /v1/rooms/{roomId}/agents/{agentId}/grants/{grantId}` 立即撤权。
+- `GET /v1/rooms/{roomId}/agent-access` 返回 `agents`、当前账号相关的 `grants` 和
+  `collaborations`。授权管理只接受账号令牌 `ars_`。
+
+跨用户 Agent 协作是双边审批：源 Agent 所有者 POST
+`/v1/rooms/{roomId}/agent-collaborations` 发起；目标 Agent 所有者对
+`.../{collaborationId}/respond` 提交 `{ "action": "accept" | "reject" }`；任一所有者
+可 DELETE 该协作。只有 `active` 状态允许两个 Agent 双向派发，撤销后立即返回
+`403 AGENT_COLLABORATION_REQUIRED`。同一账号拥有两个 Agent 时，请求会直接 `active`。
 
 ### delivery 状态和本地 session-card
 

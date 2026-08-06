@@ -3,7 +3,9 @@ import { AppError } from "../../lib/errors.js";
 import { createId } from "../../lib/secrets.js";
 import type {
   AddMemberRecord,
+  AgentClaimRecord,
   AppendMessageRecord,
+  ClaimAgentRecord,
   CreateAgentTaskRecord,
   CreateAgentTaskResult,
   CreateRoomRecord,
@@ -11,12 +13,15 @@ import type {
   OutboxEntry,
   ReplyToDeliveryRecord,
   RoomRepository,
+  StoredAgentUserGrant,
   UpdateDeliveryRecord,
 } from "./repository.js";
 import type {
   AccountRoomMembership,
   ActorType,
+  AgentCollaboration,
   AgentDelivery,
+  AgentOwnership,
   AgentProvider,
   DeliveryStatus,
   ModerationAction,
@@ -93,6 +98,31 @@ interface ModerationRuleRow extends QueryResultRow {
   pattern: string;
   action: string;
   created_at: Date;
+}
+
+interface AgentOwnershipRow extends QueryResultRow {
+  room_id: string;
+  agent_member_id: string;
+  owner_user_id: string;
+  claimed_at: Date;
+}
+
+interface AgentUserGrantRow extends QueryResultRow {
+  id: string;
+  room_id: string;
+  agent_member_id: string;
+  grantee_user_id: string;
+  created_at: Date;
+}
+
+interface AgentCollaborationRow extends QueryResultRow {
+  id: string;
+  room_id: string;
+  requester_agent_member_id: string;
+  target_agent_member_id: string;
+  status: AgentCollaboration["status"];
+  created_at: Date;
+  updated_at: Date;
 }
 
 interface PendingRow extends QueryResultRow {
@@ -226,6 +256,19 @@ export class PostgresRoomRepository implements RoomRepository {
          WHERE room_id = $1 AND removed_at IS NULL`,
         [roomId, at],
       );
+      await client.query("DELETE FROM agent_claim_codes WHERE room_id = $1", [
+        roomId,
+      ]);
+      await client.query("DELETE FROM agent_user_grants WHERE room_id = $1", [
+        roomId,
+      ]);
+      await client.query(
+        "DELETE FROM agent_collaborations WHERE room_id = $1",
+        [roomId],
+      );
+      await client.query("DELETE FROM agent_ownerships WHERE room_id = $1", [
+        roomId,
+      ]);
       return true;
     });
   }
@@ -368,6 +411,298 @@ export class PostgresRoomRepository implements RoomRepository {
       [roomId, userId],
     );
     return result.rows[0] ? mapMember(result.rows[0]) : undefined;
+  }
+
+  async findUserIdByMemberId(
+    roomId: string,
+    memberId: string,
+  ): Promise<string | undefined> {
+    const result = await this.#pool.query<{ user_id: string | null }>(
+      `SELECT user_id FROM room_members
+       WHERE room_id = $1 AND id = $2 AND removed_at IS NULL`,
+      [roomId, memberId],
+    );
+    return result.rows[0]?.user_id ?? undefined;
+  }
+
+  async issueAgentClaim(record: AgentClaimRecord): Promise<void> {
+    await this.#transaction(async (client) => {
+      const member = await client.query(
+        `SELECT 1 FROM room_members m
+         LEFT JOIN agent_ownerships o ON o.agent_member_id = m.id
+         WHERE m.room_id = $1 AND m.id = $2 AND m.actor_type = 'agent'
+           AND m.removed_at IS NULL AND o.agent_member_id IS NULL
+         FOR UPDATE OF m`,
+        [record.roomId, record.agentMemberId],
+      );
+      if (member.rowCount !== 1) {
+        const owned = await client.query(
+          "SELECT 1 FROM agent_ownerships WHERE room_id = $1 AND agent_member_id = $2",
+          [record.roomId, record.agentMemberId],
+        );
+        if (owned.rowCount === 1) {
+          throw new AppError(
+            409,
+            "AGENT_ALREADY_OWNED",
+            "The agent already has an owner",
+          );
+        }
+        throw new AppError(404, "AGENT_NOT_FOUND", "Agent member not found");
+      }
+      await client.query(
+        `UPDATE agent_claim_codes SET consumed_at = $3
+         WHERE room_id = $1 AND agent_member_id = $2 AND consumed_at IS NULL`,
+        [record.roomId, record.agentMemberId, record.createdAt],
+      );
+      await insertAgentClaim(client, record);
+    });
+  }
+
+  async claimAgent(record: ClaimAgentRecord): Promise<AgentOwnership> {
+    return this.#transaction(async (client) => {
+      const existing = await client.query(
+        "SELECT 1 FROM agent_ownerships WHERE room_id = $1 AND agent_member_id = $2",
+        [record.roomId, record.agentMemberId],
+      );
+      if (existing.rowCount === 1) {
+        throw new AppError(
+          409,
+          "AGENT_ALREADY_OWNED",
+          "The agent already has an owner",
+        );
+      }
+      const claim = await client.query<{ id: string }>(
+        `SELECT c.id
+         FROM agent_claim_codes c
+         JOIN room_members m ON m.id = c.agent_member_id
+         WHERE c.room_id = $1 AND c.agent_member_id = $2
+           AND c.code_hash = $3 AND c.consumed_at IS NULL
+           AND c.expires_at > $4 AND m.actor_type = 'agent'
+           AND m.removed_at IS NULL
+         FOR UPDATE OF c`,
+        [
+          record.roomId,
+          record.agentMemberId,
+          record.codeHash,
+          record.claimedAt,
+        ],
+      );
+      if (!claim.rows[0]) {
+        throw new AppError(
+          400,
+          "INVALID_AGENT_CLAIM",
+          "The agent claim code is invalid or expired",
+        );
+      }
+      const result = await client.query<AgentOwnershipRow>(
+        `INSERT INTO agent_ownerships
+           (room_id, agent_member_id, owner_user_id, claimed_at)
+         VALUES ($1, $2, $3, $4)
+         RETURNING room_id, agent_member_id, owner_user_id, claimed_at`,
+        [
+          record.roomId,
+          record.agentMemberId,
+          record.ownerUserId,
+          record.claimedAt,
+        ],
+      );
+      await client.query(
+        "UPDATE agent_claim_codes SET consumed_at = $1 WHERE id = $2",
+        [record.claimedAt, claim.rows[0].id],
+      );
+      return mapAgentOwnership(result.rows[0]!);
+    });
+  }
+
+  async findAgentOwnership(
+    roomId: string,
+    agentMemberId: string,
+  ): Promise<AgentOwnership | undefined> {
+    const result = await this.#pool.query<AgentOwnershipRow>(
+      `${agentOwnershipSelect} WHERE room_id = $1 AND agent_member_id = $2`,
+      [roomId, agentMemberId],
+    );
+    return result.rows[0] ? mapAgentOwnership(result.rows[0]) : undefined;
+  }
+
+  async listAgentOwnerships(roomId: string): Promise<AgentOwnership[]> {
+    const result = await this.#pool.query<AgentOwnershipRow>(
+      `${agentOwnershipSelect} WHERE room_id = $1 ORDER BY claimed_at, agent_member_id`,
+      [roomId],
+    );
+    return result.rows.map(mapAgentOwnership);
+  }
+
+  async hasAgentUserGrant(
+    roomId: string,
+    agentMemberId: string,
+    granteeUserId: string,
+  ): Promise<boolean> {
+    const result = await this.#pool.query<{ exists: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1 FROM agent_user_grants
+         WHERE room_id = $1 AND agent_member_id = $2 AND grantee_user_id = $3
+       ) AS exists`,
+      [roomId, agentMemberId, granteeUserId],
+    );
+    return result.rows[0]?.exists ?? false;
+  }
+
+  async createAgentUserGrant(
+    record: StoredAgentUserGrant,
+  ): Promise<StoredAgentUserGrant> {
+    try {
+      const result = await this.#pool.query<AgentUserGrantRow>(
+        `INSERT INTO agent_user_grants
+           (id, room_id, agent_member_id, grantee_user_id, created_at)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING id, room_id, agent_member_id, grantee_user_id, created_at`,
+        [
+          record.id,
+          record.roomId,
+          record.agentMemberId,
+          record.granteeUserId,
+          record.createdAt,
+        ],
+      );
+      return mapAgentUserGrant(result.rows[0]!);
+    } catch (error) {
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "23505"
+      ) {
+        throw new AppError(
+          409,
+          "AGENT_GRANT_EXISTS",
+          "This user can already dispatch the agent",
+        );
+      }
+      throw error;
+    }
+  }
+
+  async listAgentUserGrants(roomId: string): Promise<StoredAgentUserGrant[]> {
+    const result = await this.#pool.query<AgentUserGrantRow>(
+      `${agentUserGrantSelect} WHERE room_id = $1 ORDER BY created_at, id`,
+      [roomId],
+    );
+    return result.rows.map(mapAgentUserGrant);
+  }
+
+  async deleteAgentUserGrant(
+    roomId: string,
+    grantId: string,
+    agentMemberId: string,
+  ): Promise<boolean> {
+    const result = await this.#pool.query(
+      `DELETE FROM agent_user_grants
+       WHERE room_id = $1 AND id = $2 AND agent_member_id = $3`,
+      [roomId, grantId, agentMemberId],
+    );
+    return (result.rowCount ?? 0) === 1;
+  }
+
+  async createAgentCollaboration(
+    collaboration: AgentCollaboration,
+  ): Promise<AgentCollaboration> {
+    const [agentA, agentB] = [
+      collaboration.requesterAgentMemberId,
+      collaboration.targetAgentMemberId,
+    ].sort();
+    try {
+      const result = await this.#pool.query<AgentCollaborationRow>(
+        `INSERT INTO agent_collaborations
+           (id, room_id, requester_agent_member_id, target_agent_member_id,
+            pair_agent_a_member_id, pair_agent_b_member_id, status,
+            created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         RETURNING id, room_id, requester_agent_member_id,
+                   target_agent_member_id, status, created_at, updated_at`,
+        [
+          collaboration.id,
+          collaboration.roomId,
+          collaboration.requesterAgentMemberId,
+          collaboration.targetAgentMemberId,
+          agentA,
+          agentB,
+          collaboration.status,
+          collaboration.createdAt,
+          collaboration.updatedAt,
+        ],
+      );
+      return mapAgentCollaboration(result.rows[0]!);
+    } catch (error) {
+      if (isUniqueViolation(error, "agent_collaborations_open_pair_idx")) {
+        throw new AppError(
+          409,
+          "AGENT_COLLABORATION_EXISTS",
+          "These agents already have an open collaboration",
+        );
+      }
+      throw error;
+    }
+  }
+
+  async listAgentCollaborations(roomId: string): Promise<AgentCollaboration[]> {
+    const result = await this.#pool.query<AgentCollaborationRow>(
+      `${agentCollaborationSelect} WHERE room_id = $1 ORDER BY updated_at DESC, id`,
+      [roomId],
+    );
+    return result.rows.map(mapAgentCollaboration);
+  }
+
+  async updateAgentCollaboration(
+    roomId: string,
+    collaborationId: string,
+    allowedFrom: AgentCollaboration["status"][],
+    status: AgentCollaboration["status"],
+    updatedAt: string,
+  ): Promise<AgentCollaboration> {
+    const result = await this.#pool.query<AgentCollaborationRow>(
+      `UPDATE agent_collaborations SET status = $1, updated_at = $2
+       WHERE room_id = $3 AND id = $4 AND status = ANY($5::text[])
+       RETURNING id, room_id, requester_agent_member_id,
+                 target_agent_member_id, status, created_at, updated_at`,
+      [status, updatedAt, roomId, collaborationId, allowedFrom],
+    );
+    if (result.rows[0]) {
+      return mapAgentCollaboration(result.rows[0]);
+    }
+    const existing = await this.#pool.query<AgentCollaborationRow>(
+      `${agentCollaborationSelect} WHERE room_id = $1 AND id = $2`,
+      [roomId, collaborationId],
+    );
+    if (!existing.rows[0]) {
+      throw new AppError(
+        404,
+        "AGENT_COLLABORATION_NOT_FOUND",
+        "Agent collaboration not found",
+      );
+    }
+    throw new AppError(
+      409,
+      "INVALID_COLLABORATION_TRANSITION",
+      `Collaboration cannot transition from ${existing.rows[0].status} to ${status}`,
+    );
+  }
+
+  async hasActiveAgentCollaboration(
+    roomId: string,
+    firstAgentMemberId: string,
+    secondAgentMemberId: string,
+  ): Promise<boolean> {
+    const [agentA, agentB] = [firstAgentMemberId, secondAgentMemberId].sort();
+    const result = await this.#pool.query<{ exists: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1 FROM agent_collaborations
+         WHERE room_id = $1 AND pair_agent_a_member_id = $2
+           AND pair_agent_b_member_id = $3 AND status = 'active'
+       ) AS exists`,
+      [roomId, agentA, agentB],
+    );
+    return result.rows[0]?.exists ?? false;
   }
 
   async appendMessage(record: AppendMessageRecord): Promise<RoomMessage> {
@@ -571,13 +906,53 @@ export class PostgresRoomRepository implements RoomRepository {
     memberId: string,
     at: string,
   ): Promise<boolean> {
-    const result = await this.#pool.query(
-      `UPDATE room_members
-       SET token_revoked_at = $1, removed_at = $1
-       WHERE room_id = $2 AND id = $3 AND role <> 'owner' AND removed_at IS NULL`,
-      [at, roomId, memberId],
-    );
-    return (result.rowCount ?? 0) === 1;
+    return this.#transaction(async (client) => {
+      const result = await client.query<{
+        actor_type: RoomMember["actorType"];
+        user_id: string | null;
+      }>(
+        `UPDATE room_members
+         SET token_revoked_at = $1, removed_at = $1
+         WHERE room_id = $2 AND id = $3 AND role <> 'owner' AND removed_at IS NULL
+         RETURNING actor_type, user_id`,
+        [at, roomId, memberId],
+      );
+      const removed = result.rows[0];
+      if (!removed) {
+        return false;
+      }
+      if (removed.user_id) {
+        await client.query(
+          `DELETE FROM agent_user_grants
+           WHERE room_id = $1 AND grantee_user_id = $2`,
+          [roomId, removed.user_id],
+        );
+      }
+      if (removed.actor_type === "agent") {
+        await client.query(
+          `DELETE FROM agent_claim_codes
+           WHERE room_id = $1 AND agent_member_id = $2`,
+          [roomId, memberId],
+        );
+        await client.query(
+          `DELETE FROM agent_user_grants
+           WHERE room_id = $1 AND agent_member_id = $2`,
+          [roomId, memberId],
+        );
+        await client.query(
+          `DELETE FROM agent_collaborations
+           WHERE room_id = $1
+             AND (requester_agent_member_id = $2 OR target_agent_member_id = $2)`,
+          [roomId, memberId],
+        );
+        await client.query(
+          `DELETE FROM agent_ownerships
+           WHERE room_id = $1 AND agent_member_id = $2`,
+          [roomId, memberId],
+        );
+      }
+      return true;
+    });
   }
 
   async listModerationRules(roomId: string): Promise<ModerationRule[]> {
@@ -718,6 +1093,9 @@ export class PostgresRoomRepository implements RoomRepository {
         record.member.joinedAt,
       ],
     );
+    if (record.agentClaim) {
+      await insertAgentClaim(client, record.agentClaim);
+    }
   }
 
   async #appendMessage(
@@ -850,6 +1228,19 @@ const deliverySelect = `
          created_at, updated_at
   FROM agent_deliveries`;
 
+const agentOwnershipSelect = `
+  SELECT room_id, agent_member_id, owner_user_id, claimed_at
+  FROM agent_ownerships`;
+
+const agentUserGrantSelect = `
+  SELECT id, room_id, agent_member_id, grantee_user_id, created_at
+  FROM agent_user_grants`;
+
+const agentCollaborationSelect = `
+  SELECT id, room_id, requester_agent_member_id, target_agent_member_id,
+         status, created_at, updated_at
+  FROM agent_collaborations`;
+
 const pendingSelect = `
   SELECT
     d.id AS delivery_id,
@@ -952,6 +1343,39 @@ function mapModerationRule(row: ModerationRuleRow): ModerationRule {
   };
 }
 
+function mapAgentOwnership(row: AgentOwnershipRow): AgentOwnership {
+  return {
+    roomId: row.room_id,
+    agentMemberId: row.agent_member_id,
+    ownerUserId: row.owner_user_id,
+    claimedAt: iso(row.claimed_at),
+  };
+}
+
+function mapAgentUserGrant(row: AgentUserGrantRow): StoredAgentUserGrant {
+  return {
+    id: row.id,
+    roomId: row.room_id,
+    agentMemberId: row.agent_member_id,
+    granteeUserId: row.grantee_user_id,
+    createdAt: iso(row.created_at),
+  };
+}
+
+function mapAgentCollaboration(
+  row: AgentCollaborationRow,
+): AgentCollaboration {
+  return {
+    id: row.id,
+    roomId: row.room_id,
+    requesterAgentMemberId: row.requester_agent_member_id,
+    targetAgentMemberId: row.target_agent_member_id,
+    status: row.status,
+    createdAt: iso(row.created_at),
+    updatedAt: iso(row.updated_at),
+  };
+}
+
 function mapPending(row: PendingRow): PendingAgentDelivery {
   return {
     delivery: mapDelivery({
@@ -1012,6 +1436,25 @@ function isUniqueViolation(error: unknown, constraint: string): boolean {
     error.code === "23505" &&
     "constraint" in error &&
     error.constraint === constraint
+  );
+}
+
+async function insertAgentClaim(
+  client: Pick<Pool, "query"> | Pick<PoolClient, "query">,
+  record: AgentClaimRecord,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO agent_claim_codes
+       (id, room_id, agent_member_id, code_hash, expires_at, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [
+      record.id,
+      record.roomId,
+      record.agentMemberId,
+      record.codeHash,
+      record.expiresAt,
+      record.createdAt,
+    ],
   );
 }
 
