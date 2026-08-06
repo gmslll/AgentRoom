@@ -168,6 +168,13 @@ powershell -ExecutionPolicy Bypass -File .\agentroom-install.ps1
 & "$env:LOCALAPPDATA\AgentRoom\bin\agentroom.cmd" --help
 ```
 
+Windows Command Prompt:
+
+```bat
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Invoke-Expression (Invoke-RestMethod 'https://try-status.online/api/downloads/cli/install.ps1')"
+"%LOCALAPPDATA%\AgentRoom\bin\agentroom.cmd" --help
+```
+
 Both installers verify the bundle SHA-256 from the generated release before
 installing it into a user-local binary directory. Windows adds that directory
 to the user PATH for new terminals; macOS/Linux prints the required PATH

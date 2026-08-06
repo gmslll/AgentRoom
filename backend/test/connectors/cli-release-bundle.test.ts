@@ -39,6 +39,16 @@ describe("packaged AgentRoom CLI", () => {
         const manifest = JSON.parse(
           await readFile(join(outputDirectory, "manifest.json"), "utf8"),
         ) as { files: { bundle: { name: string } } };
+        const windowsInstaller = await readFile(
+          join(outputDirectory, "install.ps1"),
+          "utf8",
+        );
+        expect(windowsInstaller).toContain(
+          "$NodeMajor = [int]((& node -p 'process.versions.node').Split(\".\")[0])",
+        );
+        expect(windowsInstaller).not.toContain(
+          "process.versions.node.split",
+        );
         const bundlePath = join(
           outputDirectory,
           manifest.files.bundle.name,

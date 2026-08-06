@@ -14,8 +14,10 @@ describe("ConnectPanel installer commands", () => {
     ).toEqual({
       macosLinux:
         "curl -fsSL 'https://try-status.online/api/downloads/cli/install.sh' | sh",
-      windows:
+      windowsPowerShell:
         "irm 'https://try-status.online/api/downloads/cli/install.ps1' | iex",
+      windowsCmd:
+        'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Invoke-Expression (Invoke-RestMethod \'https://try-status.online/api/downloads/cli/install.ps1\')"',
     });
   });
 
@@ -29,8 +31,10 @@ describe("ConnectPanel installer commands", () => {
     ).toEqual({
       macosLinux:
         "curl -fsSL 'http://localhost:3000/api/downloads/cli/install.sh' | sh",
-      windows:
+      windowsPowerShell:
         "irm 'http://localhost:3000/api/downloads/cli/install.ps1' | iex",
+      windowsCmd:
+        'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Invoke-Expression (Invoke-RestMethod \'http://localhost:3000/api/downloads/cli/install.ps1\')"',
     });
   });
 });

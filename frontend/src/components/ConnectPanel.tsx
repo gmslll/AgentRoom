@@ -93,7 +93,13 @@ export function ConnectPanel({
               <InstallerCard
                 platform="Windows PowerShell"
                 prompt="PS>"
-                command={installerCommands!.windows}
+                command={installerCommands!.windowsPowerShell}
+                installerUrl={connector.connector.installers.windowsUrl}
+              />
+              <InstallerCard
+                platform="Windows CMD"
+                prompt=">"
+                command={installerCommands!.windowsCmd}
                 installerUrl={connector.connector.installers.windowsUrl}
               />
             </div>

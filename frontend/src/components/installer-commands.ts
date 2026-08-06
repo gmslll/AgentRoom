@@ -2,10 +2,15 @@ import type { RoomConnectorInfo } from "../api/types";
 
 export function createInstallerCommands(
   installers: RoomConnectorInfo["installers"],
-): { macosLinux: string; windows: string } {
+): { macosLinux: string; windowsPowerShell: string; windowsCmd: string } {
+  const windowsInstallerUrl = quotePowerShell(
+    installerUrl(installers.windowsUrl),
+  );
+
   return {
     macosLinux: `curl -fsSL ${quotePosix(installerUrl(installers.macosLinuxUrl))} | sh`,
-    windows: `irm ${quotePowerShell(installerUrl(installers.windowsUrl))} | iex`,
+    windowsPowerShell: `irm ${windowsInstallerUrl} | iex`,
+    windowsCmd: `powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Invoke-Expression (Invoke-RestMethod ${windowsInstallerUrl})"`,
   };
 }
 
