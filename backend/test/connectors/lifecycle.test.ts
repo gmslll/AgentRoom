@@ -77,6 +77,40 @@ describe("bridge lifecycle", () => {
     expect(appServer.runTurn).toHaveBeenCalledTimes(2);
   });
 
+  it("records Codex acceptance only after App Server accepts the turn", async () => {
+    const stateDirectory = await mkdtemp(join(tmpdir(), "agentroom-card-turn-"));
+    temporaryDirectories.push(stateDirectory);
+    const acceptedByAgent = vi.fn(async () => undefined);
+    const appServer = {
+      isRunning: vi.fn(() => false),
+      start: vi.fn(async () => undefined),
+      startOrResumeThread: vi.fn(async () => "thread_1"),
+      runTurn: vi.fn(async (
+        _threadId: string,
+        prompt: string,
+        onStarted?: (turnId: string) => void,
+      ) => {
+        expect(prompt).toContain(
+          "Local session card: /workspace/.agentroom/card.json",
+        );
+        onStarted?.("turn_1");
+        return "Done";
+      }),
+      close: vi.fn(),
+    } as unknown as CodexAppServerClient;
+    const runner = new CodexTaskRunner(
+      appServer,
+      join(stateDirectory, "state.json"),
+    );
+
+    await runner.run(pendingDelivery(), {
+      sessionCardPath: "/workspace/.agentroom/card.json",
+      acceptedByAgent,
+    });
+
+    expect(acceptedByAgent).toHaveBeenCalledTimes(1);
+  });
+
   it("never falls back to a new thread for an attached Codex session", async () => {
     const stateDirectory = await mkdtemp(join(tmpdir(), "agentroom-attached-"));
     temporaryDirectories.push(stateDirectory);

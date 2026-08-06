@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { DeliveryWorker } from "../../src/connectors/delivery-worker.js";
+import {
+  DeliveryWorker,
+  type AgentTaskLifecycle,
+} from "../../src/connectors/delivery-worker.js";
 import type { PendingAgentDelivery } from "../../src/protocol/rooms.js";
 
 function pending(status: PendingAgentDelivery["delivery"]["status"] = "queued") {
@@ -55,6 +58,43 @@ describe("DeliveryWorker", () => {
     ]);
     expect(runner.run).toHaveBeenCalledTimes(1);
     expect(api.replyToDelivery).toHaveBeenCalledWith(task.delivery.id, "Done");
+  });
+
+  it("persists a session card before dispatch and records honest evidence", async () => {
+    const api = {
+      updateDelivery: vi.fn(async () => ({})),
+      replyToDelivery: vi.fn(async () => ({})),
+    };
+    const journal = {
+      persist: vi.fn(async () => "/workspace/.agentroom/card.json"),
+      mark: vi.fn(async () => undefined),
+    };
+    const runner = {
+      run: vi.fn(async (
+        _delivery: PendingAgentDelivery,
+        lifecycle: AgentTaskLifecycle,
+      ) => {
+        expect(lifecycle.sessionCardPath).toBe(
+          "/workspace/.agentroom/card.json",
+        );
+        await lifecycle.acceptedByAgent();
+        return "Done";
+      }),
+    };
+    const task = pending();
+    const worker = new DeliveryWorker(api, runner, journal);
+
+    worker.enqueue(task);
+    await worker.idle();
+
+    expect(journal.persist).toHaveBeenCalledWith(task);
+    expect(journal.mark.mock.calls).toEqual([
+      [task.delivery.id, "server_received", undefined],
+      [task.delivery.id, "dispatch_started", undefined],
+      [task.delivery.id, "host_delivered", undefined],
+      [task.delivery.id, "agent_acknowledged", undefined],
+      [task.delivery.id, "completed", undefined],
+    ]);
   });
 
   it("resumes a running delivery without moving its state backwards", async () => {

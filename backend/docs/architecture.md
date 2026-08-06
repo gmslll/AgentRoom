@@ -18,7 +18,9 @@ while preserving seams that can be extracted later.
 ```text
 Web client ─────────────┐
 Local CLI / Bridge ───────├── HTTP + WebSocket ── API process
-Claude/Codex via MCP ──┘                         │
+Claude/Codex via MCP ──┘  │                      │
+          │               │                      │
+          └─ local session-card inbox            │
                                                        ├─ PostgreSQL
                                                        ├─ Redis
                                                        └─ S3 storage
@@ -32,6 +34,9 @@ Claude/Codex via MCP ──┘                         │
 - A local Bridge will maintain the connection and expose both a CLI and an MCP
   stdio server. AI products therefore use ordinary MCP tools instead of each
   requiring custom server logic.
+- Before provider dispatch, the Bridge writes an atomic, credential-free
+  session card under the workspace's ignored `.agentroom/` directory. This is
+  local recovery/evidence only; it never replaces PostgreSQL as task authority.
 - Remote MCP may be added later through Streamable HTTP, but it must call the
   same application services as HTTP and the local Bridge.
 

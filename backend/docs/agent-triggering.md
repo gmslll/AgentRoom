@@ -29,6 +29,33 @@ Realtime delivery is an optimization, not the durable queue.
 Every successful WebSocket connection performs this recovery before relying on
 new realtime events.
 
+## Local session cards
+
+Each bridge persists a provider-addressed session card before acknowledging or
+dispatching a task. Cards live under:
+
+```text
+<workspace>/.agentroom/session-cards/<provider>/<room-id>/<delivery-id>/
+├── card.json
+├── server_received.json
+├── dispatch_started.json
+├── host_delivered.json
+├── agent_acknowledged.json
+├── completed.json
+└── failed.json
+```
+
+`card.json` contains the immutable delivery identity, task message, attachment
+IDs, and sender metadata, but never the member access token. It is published
+only after a complete mode-`0600` temporary file has been flushed; the room and
+delivery directories are mode `0700`. Evidence files are immutable and
+idempotent, so a reconnect cannot move local evidence backward or rewrite a
+different task under an existing delivery ID.
+
+PostgreSQL remains the source of truth. The local card is a crash-recovery
+inbox and diagnostic record, not a second task authority. WebSocket and HTTP
+recovery still decide which deliveries are pending.
+
 ## Claude Code
 
 The Claude adapter is an MCP server with the experimental `claude/channel`
@@ -36,8 +63,9 @@ capability. Claude Code spawns it over stdio. The adapter maintains an outbound
 WebSocket connection to AgentRoom and turns `delivery.queued` into
 `notifications/claude/channel`.
 
-Claude receives the task inside a `<channel source="agentroom" ...>` event and
-uses these tools:
+Claude receives the task inside a `<channel source="agentroom" ...>` event;
+the channel metadata includes its local session-card path. Claude uses these
+tools:
 
 - `agentroom_ack`: mark the delivery running or failed.
 - `agentroom_reply`: post the final room reply and finish the delivery.
@@ -63,9 +91,14 @@ therefore acts as the local session host:
 1. Spawn `codex app-server` over stdio.
 2. Initialize the JSON-RPC connection.
 3. Start or resume one persisted thread for the room and workspace.
-4. Queue targeted deliveries and call `turn/start` sequentially.
+4. Persist a local session card, queue targeted deliveries, and call
+   `turn/start` sequentially.
 5. Capture the final `agentMessage` from app-server events.
 6. Post it through the same AgentRoom delivery reply endpoint.
+
+The App Server `turn/start` response records `host_delivered` and
+`agent_acknowledged`; merely putting the delivery in the local worker queue
+records only `dispatch_started`.
 
 The adapter uses the user's existing Codex authentication and default model.
 Turns run with a workspace-write sandbox, no network access, and no interactive
@@ -90,6 +123,9 @@ and exposes streamed turn state.
 - Realtime notifications are at-least-once; bridges deduplicate by delivery ID
   within a process and task creation is atomically idempotent at the repository
   boundary. Reusing a key with a different payload returns a conflict.
+- Local session cards are also at-least-once and idempotent. A reused delivery
+  ID with different immutable task content fails closed instead of overwriting
+  the original card.
 - A process crash after a tool or command runs but before reply can repeat work
   during recovery. Destructive agent actions therefore need their own
   idempotency key or human approval.

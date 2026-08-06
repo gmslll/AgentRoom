@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 
-export interface AgentRoomBridgeConfig {
+export interface AgentRoomClientConfig {
   baseUrl: string;
   roomId: string;
   accessToken: string;
@@ -9,8 +9,12 @@ export interface AgentRoomBridgeConfig {
   recoveryIntervalMs: number;
 }
 
-export interface CodexBridgeConfig extends AgentRoomBridgeConfig {
+export interface AgentRoomBridgeConfig extends AgentRoomClientConfig {
   workspace: string;
+  sessionCardRoot: string;
+}
+
+export interface CodexBridgeConfig extends AgentRoomBridgeConfig {
   stateFile: string;
   codexCommand: string;
   codexRequestTimeoutMs: number;
@@ -23,6 +27,7 @@ export function loadAgentRoomBridgeConfig(
   const baseUrl = env.AGENTROOM_BASE_URL ?? "http://127.0.0.1:8787";
   const roomId = env.AGENTROOM_ROOM_ID;
   const accessToken = env.AGENTROOM_ACCESS_TOKEN;
+  const workspace = resolve(env.AGENTROOM_WORKSPACE ?? process.cwd());
 
   if (!roomId) {
     throw new Error("AGENTROOM_ROOM_ID is required");
@@ -40,6 +45,11 @@ export function loadAgentRoomBridgeConfig(
     baseUrl: url.toString().replace(/\/$/, ""),
     roomId,
     accessToken,
+    workspace,
+    sessionCardRoot: resolve(
+      env.AGENTROOM_SESSION_CARD_ROOT ??
+        resolve(workspace, ".agentroom", "session-cards"),
+    ),
     httpTimeoutMs: positiveInteger(
       env.AGENTROOM_HTTP_TIMEOUT_MS,
       15_000,
@@ -77,15 +87,13 @@ export function loadCodexBridgeConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): CodexBridgeConfig {
   const common = loadAgentRoomBridgeConfig(env);
-  const workspace = resolve(env.AGENTROOM_WORKSPACE ?? process.cwd());
   const safeRoomId = common.roomId.replaceAll(/[^a-zA-Z0-9_-]/g, "_");
 
   return {
     ...common,
-    workspace,
     stateFile:
       env.AGENTROOM_STATE_FILE ??
-      resolve(workspace, ".agentroom", `codex-${safeRoomId}.json`),
+      resolve(common.workspace, ".agentroom", `codex-${safeRoomId}.json`),
     codexCommand: env.AGENTROOM_CODEX_COMMAND ?? "codex",
     codexRequestTimeoutMs: positiveInteger(
       env.AGENTROOM_CODEX_REQUEST_TIMEOUT_MS,

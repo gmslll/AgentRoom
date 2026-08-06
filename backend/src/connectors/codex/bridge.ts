@@ -4,6 +4,7 @@ import { loadCodexBridgeConfig } from "../config.js";
 import { CodexAppServerClient } from "./app-server-client.js";
 import { CodexTaskRunner } from "./runner.js";
 import { DeliveryWorker } from "../delivery-worker.js";
+import { SessionCardStore } from "../session-cards.js";
 
 const config = loadCodexBridgeConfig();
 const client = new AgentRoomClient(config);
@@ -14,7 +15,12 @@ const appServer = new CodexAppServerClient(
   config.codexTurnTimeoutMs,
 );
 const runner = new CodexTaskRunner(appServer, config.stateFile);
-const worker = new DeliveryWorker(client, runner);
+const sessionCards = new SessionCardStore(
+  config.sessionCardRoot,
+  "codex",
+  config.roomId,
+);
+const worker = new DeliveryWorker(client, runner, sessionCards);
 const abortController = new AbortController();
 
 function shutdown(): void {

@@ -162,7 +162,11 @@ export class CodexAppServerClient {
     return parseCodexThreadList(result);
   }
 
-  async runTurn(threadId: string, prompt: string): Promise<string> {
+  async runTurn(
+    threadId: string,
+    prompt: string,
+    onStarted?: (turnId: string) => void,
+  ): Promise<string> {
     const result = asObject(
       await this.request("turn/start", {
         threadId,
@@ -177,6 +181,7 @@ export class CodexAppServerClient {
       }),
     );
     const turnId = requiredNestedId(result, "turn");
+    onStarted?.(turnId);
     const completed = this.#completedTurns.get(turnId);
     if (completed) {
       this.#completedTurns.delete(turnId);

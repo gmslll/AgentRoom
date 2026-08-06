@@ -8,9 +8,18 @@ import {
 import type { PendingAgentDelivery } from "../../protocol/rooms.js";
 import { AgentRoomClient } from "../agentroom-client.js";
 import { loadAgentRoomBridgeConfig } from "../config.js";
+import {
+  SessionCardStore,
+  type SessionCardEvidenceStatus,
+} from "../session-cards.js";
 
 const config = loadAgentRoomBridgeConfig();
 const client = new AgentRoomClient(config);
+const sessionCards = new SessionCardStore(
+  config.sessionCardRoot,
+  "claude",
+  config.roomId,
+);
 const abortController = new AbortController();
 const forwardedInThisProcess = new Set<string>();
 const forwardingInThisProcess = new Set<string>();
@@ -88,12 +97,18 @@ mcp.setRequestHandler(CallToolRequestSchema, async (request) => {
       status,
       status === "failed" ? requiredString(args, "error") : undefined,
     );
+    await markCard(
+      deliveryId,
+      status === "running" ? "agent_acknowledged" : "failed",
+      status === "failed" ? requiredString(args, "error") : undefined,
+    );
     return toolText(`Delivery ${deliveryId} marked ${status}`);
   }
 
   if (request.params.name === "agentroom_reply") {
     const deliveryId = requiredString(args, "delivery_id");
     await client.replyToDelivery(deliveryId, requiredString(args, "text"));
+    await markCard(deliveryId, "completed");
     return toolText(`Reply sent for ${deliveryId}`);
   }
 
@@ -115,9 +130,12 @@ async function forwardDelivery(pending: PendingAgentDelivery): Promise<void> {
   forwardingInThisProcess.add(id);
 
   try {
+    await sessionCards.persist(pending);
     if (pending.delivery.status === "queued") {
       await client.updateDelivery(id, "received");
     }
+    await markCard(id, "server_received");
+    await markCard(id, "dispatch_started");
 
     await mcp.notification({
       method: "notifications/claude/channel",
@@ -129,10 +147,12 @@ async function forwardDelivery(pending: PendingAgentDelivery): Promise<void> {
           task_message_id: pending.task.id,
           sender_id: pending.task.author.memberId,
           sender_name: pending.task.author.displayName,
+          session_card: sessionCards.cardPath(id),
           recovery: pending.delivery.status === "queued" ? "false" : "true",
         },
       },
     });
+    await markCard(id, "host_delivered");
     forwardedInThisProcess.add(id);
   } finally {
     forwardingInThisProcess.delete(id);
@@ -218,4 +238,19 @@ function optionalInteger(
 
 function toolText(text: string) {
   return { content: [{ type: "text" as const, text }] };
+}
+
+async function markCard(
+  deliveryId: string,
+  status: SessionCardEvidenceStatus,
+  detail?: string,
+): Promise<void> {
+  try {
+    await sessionCards.mark(deliveryId, status, detail);
+  } catch (error) {
+    console.error(
+      `Could not record local session-card evidence ${status} for ${deliveryId}:`,
+      error,
+    );
+  }
 }

@@ -5,7 +5,7 @@ import type {
   RealtimeServerEvent,
   RoomMessage,
 } from "../protocol/rooms.js";
-import type { AgentRoomBridgeConfig } from "./config.js";
+import type { AgentRoomClientConfig } from "./config.js";
 
 interface ApiErrorBody {
   error?: {
@@ -15,7 +15,7 @@ interface ApiErrorBody {
 }
 
 export class AgentRoomClient {
-  constructor(private readonly config: AgentRoomBridgeConfig) {}
+  constructor(private readonly config: AgentRoomClientConfig) {}
 
   async listPendingDeliveries(): Promise<PendingAgentDelivery[]> {
     const body = await this.request<{ items: PendingAgentDelivery[] }>(

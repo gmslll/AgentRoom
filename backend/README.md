@@ -189,6 +189,13 @@ It never prints the member token. Start a saved bridge with:
 node dist/connectors/cli.js run --config /absolute/path/to/private-config.json
 ```
 
+For every targeted task, the running bridge first publishes a private local
+session card under
+`.agentroom/session-cards/<provider>/<room-id>/<delivery-id>/`. The card never
+contains the member token. Immutable evidence files distinguish local storage,
+server receipt, provider delivery, explicit agent acknowledgement, and terminal
+completion/failure. PostgreSQL and the HTTP delivery state remain authoritative.
+
 To bind an existing Claude or Codex conversation instead of creating a fresh
 agent conversation, run:
 
