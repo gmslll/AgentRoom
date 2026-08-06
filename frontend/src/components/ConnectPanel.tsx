@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { ConnectorResponse, RotateInviteResponse } from "../api/types";
 import { useRotateInvite } from "../api/hooks";
 import { CopyButton } from "./CopyButton";
+import { createInstallerCommands } from "./installer-commands";
 
 interface ConnectPanelProps {
   roomId: string;
@@ -30,6 +31,9 @@ export function ConnectPanel({
 }: ConnectPanelProps) {
   const [inviteCode, setInviteCode] = useState<string | null>(null);
   const rotate = useRotateInvite(roomId);
+  const installerCommands = connector
+    ? createInstallerCommands(connector.connector.installers)
+    : null;
 
   const handleShowInvite = async () => {
     if (inviteCode) return;
@@ -71,25 +75,39 @@ export function ConnectPanel({
       ) : (
         <>
           <div className="space-y-2">
-            <p className="text-xs text-muted">① 安装 AgentRoom CLI(二选一):</p>
-            <div className="flex gap-2">
-              <a
-                href={connector.connector.installers.macosLinuxUrl}
-                className="rounded-md border border-border px-2 py-1 text-xs text-text transition-colors hover:border-border-strong hover:bg-surface-raised"
-              >
-                macOS / Linux 安装器
-              </a>
-              <a
-                href={connector.connector.installers.windowsUrl}
-                className="rounded-md border border-border px-2 py-1 text-xs text-text transition-colors hover:border-border-strong hover:bg-surface-raised"
-              >
-                Windows 安装器
-              </a>
+            <div className="flex items-baseline justify-between gap-3">
+              <p className="text-xs text-muted">
+                ① 第一次使用，复制对应系统的安装命令：
+              </p>
+              <span className="shrink-0 rounded-full border border-terminal/20 bg-terminal/5 px-2 py-0.5 text-[10px] text-terminal">
+                只需安装一次
+              </span>
             </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <InstallerCard
+                platform="macOS / Linux"
+                prompt="$"
+                command={installerCommands!.macosLinux}
+                installerUrl={connector.connector.installers.macosLinuxUrl}
+              />
+              <InstallerCard
+                platform="Windows PowerShell"
+                prompt="PS>"
+                command={installerCommands!.windows}
+                installerUrl={connector.connector.installers.windowsUrl}
+              />
+            </div>
+            <p className="text-[11px] leading-relaxed text-muted">
+              安装器会校验 CLI 的 SHA-256。安装完成后重新打开终端，运行{" "}
+              <code className="font-mono text-text">agentroom --version</code>{" "}
+              验证。
+            </p>
           </div>
 
           <div className="space-y-2">
-            <p className="text-xs text-muted">② 复制并运行加入命令:</p>
+            <p className="text-xs text-muted">
+              ② 在目标项目目录中复制并运行加入命令：
+            </p>
             <CommandRow
               label="新会话加入"
               command={connector.connector.command}
@@ -103,7 +121,9 @@ export function ConnectPanel({
           </div>
 
           <div className="space-y-2">
-            <p className="text-xs text-muted">③ 邀请码(CLI 会交互式询问):</p>
+            <p className="text-xs text-muted">
+              ③ 获取邀请码（CLI 会交互式询问）：
+            </p>
             {inviteCode ? (
               <div className="flex items-center gap-2">
                 <code className="min-w-0 flex-1 truncate rounded-md border border-border bg-surface px-2 py-1 font-mono text-xs text-text">
@@ -155,9 +175,49 @@ export function ConnectPanel({
       )}
 
       <p className="text-xs text-muted">
-        ⚠ 开发预览:<code className="font-mono">@agentroom/bridge</code> 尚未发布
-        npm,当前通过后端直接分发安装器。
+        Claude Code 与 Codex 共用这份用户级安装；Provider MCP 启动时会自动检查并
+        更新 AgentRoom。
       </p>
+    </div>
+  );
+}
+
+function InstallerCard({
+  platform,
+  prompt,
+  command,
+  installerUrl,
+}: {
+  platform: string;
+  prompt: string;
+  command: string;
+  installerUrl: string;
+}) {
+  return (
+    <div className="min-w-0 rounded-lg border border-border bg-surface p-2.5 shadow-sm">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="text-xs font-medium text-text">{platform}</span>
+        <a
+          href={installerUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="text-[10px] text-muted underline decoration-border-strong underline-offset-2 transition-colors hover:text-text"
+        >
+          查看脚本
+        </a>
+      </div>
+      <div className="flex min-w-0 items-center gap-2 rounded-md border border-border bg-bg px-2 py-1.5">
+        <span className="shrink-0 font-mono text-[10px] text-terminal">
+          {prompt}
+        </span>
+        <code
+          className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-mono text-[11px] text-text"
+          title={command}
+        >
+          {command}
+        </code>
+        <CopyButton text={command} label="复制" className="shrink-0" />
+      </div>
     </div>
   );
 }
