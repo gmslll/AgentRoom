@@ -242,7 +242,7 @@ $ExpectedSha256 = ${powerShellQuote(bundleSha256)}
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
   throw "Node.js 22 or newer is required."
 }
-$NodeMajor = [int](& node -p 'Number(process.versions.node.split(".")[0])')
+$NodeMajor = [int]((& node -p 'process.versions.node').Split(".")[0])
 if ($NodeMajor -lt 22) {
   throw "Node.js 22 or newer is required; found $(& node --version)."
 }

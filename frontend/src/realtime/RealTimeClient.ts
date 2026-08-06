@@ -2,7 +2,9 @@ import { apiUrl } from "../api/client";
 import type {
   AgentDelivery,
   Member,
+  MemberPresence,
   Message,
+  Room,
   RealtimeEnvelope,
   RealtimeTicket,
 } from "../api/types";
@@ -14,7 +16,9 @@ export interface RealTimeHandlers {
   onMessageCreated: (message: Message) => void;
   onDeliveryUpdated: (delivery: AgentDelivery) => void;
   onMemberRemoved: (memberId: string) => void;
-  onMemberPresence?: (memberId: string, online: boolean) => void;
+  onRoomUpdated?: (room: Room) => void;
+  onRoomDissolved?: () => void;
+  onMemberPresence?: (presence: MemberPresence) => void;
 }
 
 /** Minimal WebSocket surface the client relies on (injectable in tests). */
@@ -143,10 +147,18 @@ export class RealTimeClient {
         );
         break;
       case "member.presence":
-        this.options.handlers.onMemberPresence?.(
-          data?.memberId as string,
-          Boolean(data?.online),
-        );
+        this.options.handlers.onMemberPresence?.({
+          memberId: String(data?.memberId),
+          online: Boolean(data?.online),
+          lastSeenAt:
+            typeof data?.lastSeenAt === "string" ? data.lastSeenAt : null,
+        });
+        break;
+      case "room.updated":
+        this.options.handlers.onRoomUpdated?.(data?.room as Room);
+        break;
+      case "room.dissolved":
+        this.options.handlers.onRoomDissolved?.();
         break;
       default:
         // Includes "pong" and "delivery.queued" (only sent to the target AI).

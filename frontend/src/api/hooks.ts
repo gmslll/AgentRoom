@@ -3,15 +3,18 @@ import { useNavigate } from "react-router-dom";
 import { getMe, login, logout, register } from "./auth";
 import {
   createRoom,
+  dissolveRoom,
   getConnector,
   joinRoom,
   listMembers,
   listMessages,
   listPresence,
+  listPublicRooms,
   listRooms,
   removeRoomMember,
   rotateInvite,
   sendMessage,
+  updateRoom,
 } from "./rooms";
 import { ApiError } from "./client";
 import type {
@@ -21,6 +24,8 @@ import type {
   RegisterInput,
   SendMessageResult,
   TextMessageInput,
+  RoomVisibility,
+  UpdateRoomInput,
 } from "./types";
 import { useMessageStore } from "../stores/messageStore";
 import { useMemberStore } from "../stores/memberStore";
@@ -30,7 +35,9 @@ import { useTokenStore } from "../stores/tokenStore";
 const AUTH_KEYS = {
   me: ["auth", "me"] as const,
   rooms: ["rooms"] as const,
+  publicRooms: ["public-rooms"] as const,
   members: (roomId: string) => ["rooms", roomId, "members"] as const,
+  presence: (roomId: string) => ["rooms", roomId, "presence"] as const,
   connector: (roomId: string) => ["rooms", roomId, "connector"] as const,
   messages: (roomId: string) => ["rooms", roomId, "messages"] as const,
 };
@@ -109,9 +116,49 @@ export function useCreateRoom() {
   const token = useAuthToken();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (name: string) => createRoom(token as string, name),
+    mutationFn: (input: { name: string; visibility: RoomVisibility }) =>
+      createRoom(token as string, input.name, input.visibility),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: AUTH_KEYS.rooms });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: AUTH_KEYS.rooms }),
+        queryClient.invalidateQueries({ queryKey: AUTH_KEYS.publicRooms }),
+      ]);
+    },
+  });
+}
+
+export function usePublicRooms() {
+  return useQuery({
+    queryKey: AUTH_KEYS.publicRooms,
+    queryFn: listPublicRooms,
+  });
+}
+
+export function useUpdateRoom(roomId: string) {
+  const token = useAuthToken();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: UpdateRoomInput) =>
+      updateRoom(token as string, roomId, input),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: AUTH_KEYS.rooms }),
+        queryClient.invalidateQueries({ queryKey: AUTH_KEYS.publicRooms }),
+      ]);
+    },
+  });
+}
+
+export function useDissolveRoom(roomId: string) {
+  const token = useAuthToken();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => dissolveRoom(token as string, roomId),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: AUTH_KEYS.rooms }),
+        queryClient.invalidateQueries({ queryKey: AUTH_KEYS.publicRooms }),
+      ]);
     },
   });
 }
@@ -120,9 +167,9 @@ export function useJoinRoom(roomId: string) {
   const token = useAuthToken();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: { inviteCode: string; displayName: string }) =>
+    mutationFn: (input: { inviteCode?: string; displayName: string }) =>
       joinRoom(token as string, roomId, {
-        inviteCode: input.inviteCode,
+        ...(input.inviteCode ? { inviteCode: input.inviteCode } : {}),
         displayName: input.displayName,
         actorType: "human",
       }),
@@ -132,7 +179,38 @@ export function useJoinRoom(roomId: string) {
   });
 }
 
-export function useMembers(roomId: string) {
+export function useJoinPublicRoom() {
+  const token = useAuthToken();
+  const displayName = useTokenStore((state) => state.user?.displayName ?? "");
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (roomId: string) =>
+      joinRoom(token as string, roomId, {
+        displayName,
+        actorType: "human",
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: AUTH_KEYS.rooms });
+    },
+  });
+}
+
+export function useRemoveMember(roomId: string) {
+  const token = useAuthToken();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (memberId: string) =>
+      removeRoomMember(token as string, roomId, memberId),
+    onSuccess: async (_result, memberId) => {
+      useMemberStore.getState().removeMember(memberId);
+      await queryClient.invalidateQueries({
+        queryKey: AUTH_KEYS.members(roomId),
+      });
+    },
+  });
+}
+
+export function useMembers(roomId: string, enabled = true) {
   const token = useAuthToken();
   const setMembers = useMemberStore((state) => state.setMembers);
   return useQuery({
@@ -142,20 +220,15 @@ export function useMembers(roomId: string) {
       setMembers(result.items);
       return result.items;
     },
-    enabled: Boolean(token) && Boolean(roomId),
+    enabled: Boolean(token) && Boolean(roomId) && enabled,
   });
 }
 
-/**
- * Loads the presence snapshot (online state derived from live WebSocket
- * connections) into the member store. Never guess online state from the
- * member list.
- */
-export function usePresence(roomId: string) {
+export function usePresence(roomId: string, enabled = true) {
   const token = useAuthToken();
   const setPresence = useMemberStore((state) => state.setPresence);
   return useQuery({
-    queryKey: ["rooms", roomId, "presence"],
+    queryKey: AUTH_KEYS.presence(roomId),
     queryFn: async () => {
       const result = await listPresence(token as string, roomId);
       for (const item of result.items) {
@@ -163,34 +236,17 @@ export function usePresence(roomId: string) {
       }
       return result.items;
     },
-    enabled: Boolean(token) && Boolean(roomId),
+    enabled: Boolean(token) && Boolean(roomId) && enabled,
+    refetchInterval: 30_000,
   });
 }
 
-/** Removes a member (owner only). The room owner cannot be removed. */
-export function useRemoveMember(roomId: string) {
-  const token = useAuthToken();
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (memberId: string) =>
-      removeRoomMember(token as string, roomId, memberId),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({
-        queryKey: AUTH_KEYS.members(roomId),
-      });
-      await queryClient.invalidateQueries({
-        queryKey: ["rooms", roomId, "presence"],
-      });
-    },
-  });
-}
-
-export function useConnector(roomId: string) {
+export function useConnector(roomId: string, enabled = true) {
   const token = useAuthToken();
   return useQuery({
     queryKey: AUTH_KEYS.connector(roomId),
     queryFn: () => getConnector(token as string, roomId),
-    enabled: Boolean(token) && Boolean(roomId),
+    enabled: Boolean(token) && Boolean(roomId) && enabled,
     retry: false,
   });
 }
@@ -217,7 +273,7 @@ export function useRotateInvite(roomId: string) {
 const MAX_HISTORY_PAGES = 20; // 20 × 50 = 1000 messages
 const HISTORY_PAGE_SIZE = 50;
 
-export function useMessageHistory(roomId: string) {
+export function useMessageHistory(roomId: string, enabled = true) {
   const token = useAuthToken();
   const upsertMessages = useMessageStore((state) => state.upsertMessages);
   const setHasOlder = useMessageStore((state) => state.setHasOlder);
@@ -245,7 +301,7 @@ export function useMessageHistory(roomId: string) {
       setHasOlder(false);
       return { items, nextAfterSequence: nextAfter };
     },
-    enabled: Boolean(token) && Boolean(roomId),
+    enabled: Boolean(token) && Boolean(roomId) && enabled,
     staleTime: 0,
   });
 }

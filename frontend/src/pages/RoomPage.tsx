@@ -8,7 +8,7 @@ import {
   useMembers,
   useMessageHistory,
   usePresence,
-  useRemoveMember,
+  usePublicRooms,
   useRooms,
 } from "../api/hooks";
 import { getRealtimeTicket } from "../api/rooms";
@@ -21,8 +21,8 @@ import { ConnectPanel } from "../components/ConnectPanel";
 import { MemberPanel } from "../components/MemberPanel";
 import { MessageList } from "../components/MessageList";
 import { TaskComposer, type TaskComposerPreset } from "../components/TaskComposer";
+import { RoomSettingsPanel } from "../components/RoomSettingsPanel";
 import { formatDate } from "../lib/time";
-import { toastError } from "../stores/toastStore";
 import type { Message } from "../api/types";
 
 export default function RoomPage() {
@@ -33,7 +33,9 @@ export default function RoomPage() {
   const queryClient = useQueryClient();
 
   const [waitingForAgent, setWaitingForAgent] = useState(false);
-  const [rightTab, setRightTab] = useState<"members" | "connect">("members");
+  const [rightTab, setRightTab] = useState<
+    "members" | "connect" | "settings"
+  >("members");
   const [taskPreset, setTaskPreset] = useState<TaskComposerPreset | null>(null);
 
   // Store actions.
@@ -48,35 +50,22 @@ export default function RoomPage() {
   const resetDeliveries = useDeliveryStore((state) => state.reset);
 
   const rooms = useRooms();
+  const publicRooms = usePublicRooms();
   const membership = rooms.data?.items.find(
     (item) => item.room.id === roomId,
   );
-  const myMemberId = membership?.member.id ?? "";
   const isOwner = membership?.member.role === "owner";
   const joined = Boolean(membership);
+  const isPublic = publicRooms.data?.items.some((room) => room.id === roomId);
 
   const hasAgents = useMemberStore(
     (state) => Object.values(state.byId).some((m) => m.actorType === "agent"),
   );
 
-  useMembers(roomId);
-  usePresence(roomId);
-  useMessageHistory(roomId);
-  const connectorQuery = useConnector(roomId);
-  const removeMemberMutation = useRemoveMember(roomId);
-
-  const handleRemoveMember = (memberId: string) => {
-    if (
-      !window.confirm(
-        "确认移除该成员?其访问令牌将立即失效,被移除后需重新邀请才能加入。",
-      )
-    ) {
-      return;
-    }
-    removeMemberMutation.mutate(memberId, {
-      onError: (error) => toastError(error, "移除成员失败"),
-    });
-  };
+  useMembers(roomId, joined);
+  usePresence(roomId, joined);
+  useMessageHistory(roomId, joined);
+  const connectorQuery = useConnector(roomId, Boolean(isOwner));
 
   /** Opens dispatch mode pre-selecting one agent (member panel action). */
   const handleDispatchTo = (memberId: string) => {
@@ -110,9 +99,15 @@ export default function RoomPage() {
       getTicket: () => getRealtimeTicket(token, roomId),
       handlers: {
         onSessionReady: () => {
+          if (membership?.member.id) {
+            setPresence(membership.member.id, true);
+          }
           // Backfill any gap since the local watermark.
           void queryClient.invalidateQueries({
             queryKey: ["rooms", roomId, "messages"],
+          });
+          void queryClient.invalidateQueries({
+            queryKey: ["rooms", roomId, "presence"],
           });
         },
         onMemberJoined: (member) => {
@@ -122,17 +117,24 @@ export default function RoomPage() {
         onMessageCreated: (message) => upsertMessages([message]),
         onDeliveryUpdated: (delivery) => upsertDelivery(delivery),
         onMemberRemoved: (memberId) => {
-          if (memberId === myMemberId) {
-            // We were removed: leave the room cleanly and go back to the list.
-            resetMessages();
-            resetMembers();
-            resetDeliveries();
+          if (memberId === membership?.member.id) {
+            void queryClient.invalidateQueries({ queryKey: ["rooms"] });
             navigate("/rooms", { replace: true });
             return;
           }
           removeMember(memberId);
         },
-        onMemberPresence: (memberId, online) => setPresence(memberId, online),
+        onMemberPresence: (presence) =>
+          setPresence(presence.memberId, presence.online),
+        onRoomUpdated: () => {
+          void queryClient.invalidateQueries({ queryKey: ["rooms"] });
+          void queryClient.invalidateQueries({ queryKey: ["public-rooms"] });
+        },
+        onRoomDissolved: () => {
+          void queryClient.invalidateQueries({ queryKey: ["rooms"] });
+          void queryClient.invalidateQueries({ queryKey: ["public-rooms"] });
+          navigate("/rooms", { replace: true });
+        },
       },
     });
     client.connect();
@@ -141,16 +143,13 @@ export default function RoomPage() {
     token,
     roomId,
     joined,
-    myMemberId,
     queryClient,
     upsertMessages,
     upsertMember,
     upsertDelivery,
     removeMember,
     setPresence,
-    resetMessages,
-    resetMembers,
-    resetDeliveries,
+    membership?.member.id,
     navigate,
   ]);
 
@@ -211,9 +210,12 @@ export default function RoomPage() {
                   <h2 className="truncate text-sm font-semibold text-text">
                     {membership?.room.name}
                   </h2>
-                  <span className="text-xs text-muted">
-                    {formatDate(membership?.room.createdAt ?? "")}
-                  </span>
+                  <div className="flex items-center gap-2 text-xs text-muted">
+                    <span className="rounded-full border border-border px-2 py-0.5">
+                      {membership?.room.visibility === "public" ? "公开" : "私有"}
+                    </span>
+                    <span>{formatDate(membership?.room.createdAt ?? "")}</span>
+                  </div>
                 </header>
                 <div className="min-h-0 flex-1">
                   <MessageList
@@ -247,12 +249,11 @@ export default function RoomPage() {
           {/* Right rail: members / connect. */}
           <aside className="flex w-72 shrink-0 flex-col border-l border-border bg-surface/60">
             <div className="flex border-b border-border text-sm">
-              {(
-                [
-                  ["members", "成员"],
-                  ["connect", "接入"],
-                ] as const
-              ).map(([key, label]) => (
+              {([
+                ["members", "成员"],
+                ["connect", "接入"],
+                ...(isOwner ? [["settings", "设置"]] : []),
+              ] as Array<["members" | "connect" | "settings", string]>).map(([key, label]) => (
                 <button
                   key={key}
                   type="button"
@@ -270,12 +271,11 @@ export default function RoomPage() {
             <div className="min-h-0 flex-1 overflow-y-auto">
               {rightTab === "members" ? (
                 <MemberPanel
+                  roomId={roomId}
                   isOwner={Boolean(isOwner)}
-                  myMemberId={myMemberId}
                   onDispatchTask={handleDispatchTo}
-                  onRemoveMember={handleRemoveMember}
                 />
-              ) : (
+              ) : rightTab === "connect" ? (
                 <ConnectPanel
                   roomId={roomId}
                   connector={connectorQuery.data}
@@ -284,19 +284,24 @@ export default function RoomPage() {
                   waitingForAgent={waitingForAgent}
                   onCommandCopied={() => setWaitingForAgent(true)}
                 />
-              )}
+              ) : membership ? (
+                <RoomSettingsPanel
+                  room={membership.room}
+                  onDissolved={() => navigate("/rooms", { replace: true })}
+                />
+              ) : null}
             </div>
           </aside>
         </>
       ) : (
-        <JoinRoomForm roomId={roomId} />
+        <JoinRoomForm roomId={roomId} isPublic={Boolean(isPublic)} />
       )}
     </div>
   );
 }
 
 /** Invite-code join form shown when the account is not yet a room member. */
-function JoinRoomForm({ roomId }: { roomId: string }) {
+function JoinRoomForm({ roomId, isPublic }: { roomId: string; isPublic: boolean }) {
   const joinRoom = useJoinRoom(roomId);
   const defaultName = useTokenStore((state) => state.user?.displayName ?? "");
   const [inviteCode, setInviteCode] = useState("");
@@ -307,10 +312,13 @@ function JoinRoomForm({ roomId }: { roomId: string }) {
     event.preventDefault();
     const code = inviteCode.trim();
     const name = displayName.trim();
-    if (!code || !name) return;
+    if (!name) return;
     setError(null);
     try {
-      await joinRoom.mutateAsync({ inviteCode: code, displayName: name });
+      await joinRoom.mutateAsync({
+        ...(code ? { inviteCode: code } : {}),
+        displayName: name,
+      });
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.code === "ACCOUNT_ALREADY_MEMBER") {
@@ -345,17 +353,25 @@ function JoinRoomForm({ roomId }: { roomId: string }) {
         <p className="font-data text-[11px] uppercase tracking-[0.2em] text-muted">
           $ agentroom join
         </p>
-        <h2 className="text-lg font-semibold text-text">通过邀请码加入房间</h2>
-        <label className="block">
-          <span className="mb-1 block text-xs text-muted">邀请码</span>
-          <input
-            type="text"
-            value={inviteCode}
-            onChange={(e) => setInviteCode(e.target.value)}
-            placeholder="ari_xxx"
-            className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-muted/60 focus:border-primary focus:outline-none"
-          />
-        </label>
+        <h2 className="text-lg font-semibold text-text">
+          {isPublic ? "加入公开聊天室" : "加入聊天室"}
+        </h2>
+        {isPublic ? (
+          <p className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-sm text-muted">
+            这是公开聊天室,无需邀请码即可加入。
+          </p>
+        ) : (
+          <label className="block">
+            <span className="mb-1 block text-xs text-muted">邀请码</span>
+            <input
+              type="text"
+              value={inviteCode}
+              onChange={(e) => setInviteCode(e.target.value)}
+              placeholder="ari_xxx"
+              className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-muted/60 focus:border-primary focus:outline-none"
+            />
+          </label>
+        )}
         <label className="block">
           <span className="mb-1 block text-xs text-muted">房间内昵称</span>
           <input

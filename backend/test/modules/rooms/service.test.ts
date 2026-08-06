@@ -26,6 +26,42 @@ async function setupRoom() {
 }
 
 describe("RoomService concurrency", () => {
+  it("publishes room governance events and revokes the owner on dissolution", async () => {
+    const repository = new InMemoryRoomRepository();
+    const eventBus = new InMemoryEventBus();
+    const service = new RoomService(repository, eventBus);
+    const owner = await service.createRoom({
+      name: "Governed room",
+      displayName: "Owner",
+      ownerUserId: null,
+    });
+    const events: string[] = [];
+    eventBus.subscribe(owner.room.id, owner.member.id, (event) => {
+      events.push(event.type);
+    });
+
+    const updated = await service.updateRoom({
+      roomId: owner.room.id,
+      accessToken: owner.accessToken,
+      name: "Published room",
+      visibility: "public",
+    });
+    expect(updated).toMatchObject({
+      name: "Published room",
+      visibility: "public",
+    });
+
+    await service.dissolveRoom({
+      roomId: owner.room.id,
+      accessToken: owner.accessToken,
+    });
+    expect(events).toEqual(["room.updated", "room.dissolved"]);
+    await expect(
+      service.authenticate(owner.room.id, owner.accessToken),
+    ).rejects.toMatchObject({ code: "ROOM_NOT_FOUND" });
+    await expect(repository.isActiveMember(owner.room.id, owner.member.id)).resolves.toBe(false);
+  });
+
   it("creates one task and delivery under concurrent idempotent requests", async () => {
     const { service, owner, agent } = await setupRoom();
     const request = () =>

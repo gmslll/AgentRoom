@@ -4,10 +4,12 @@ export const agentProviders = ["claude", "codex", "other"] as const;
 export type AgentProvider = (typeof agentProviders)[number];
 
 export type MemberRole = "owner" | "member";
+export type RoomVisibility = "private" | "public";
 
 export interface Room {
   id: string;
   name: string;
+  visibility: RoomVisibility;
   createdAt: string;
 }
 
@@ -179,6 +181,28 @@ export interface MemberPresenceEvent {
   };
 }
 
+export interface RoomUpdatedEvent {
+  version: 1;
+  eventId: string;
+  type: "room.updated";
+  roomId: string;
+  occurredAt: string;
+  data: {
+    room: Room;
+  };
+}
+
+export interface RoomDissolvedEvent {
+  version: 1;
+  eventId: string;
+  type: "room.dissolved";
+  roomId: string;
+  occurredAt: string;
+  data: {
+    dissolvedByMemberId: string;
+  };
+}
+
 export interface MemberPresenceSnapshot {
   memberId: string;
   online: boolean;
@@ -190,6 +214,8 @@ export type RealtimeServerEvent =
   | MemberJoinedEvent
   | MemberRemovedEvent
   | MemberPresenceEvent
+  | RoomUpdatedEvent
+  | RoomDissolvedEvent
   | RoomEvent
   | DeliveryQueuedEvent
   | DeliveryUpdatedEvent;

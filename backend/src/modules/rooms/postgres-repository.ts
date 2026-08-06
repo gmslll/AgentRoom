@@ -30,6 +30,7 @@ import type {
 interface RoomRow extends QueryResultRow {
   id: string;
   name: string;
+  visibility: Room["visibility"];
   created_at: Date;
 }
 
@@ -46,6 +47,7 @@ interface MemberRow extends QueryResultRow {
 interface AccountRoomRow extends QueryResultRow {
   room_id: string;
   room_name: string;
+  room_visibility: Room["visibility"];
   room_created_at: Date;
   member_id: string;
   member_display_name: string;
@@ -153,11 +155,12 @@ export class PostgresRoomRepository implements RoomRepository {
     await this.#transaction(async (client) => {
       await client.query(
         `INSERT INTO rooms
-           (id, name, owner_user_id, invite_code_hash, created_at)
-         VALUES ($1, $2, $3, $4, $5)`,
+           (id, name, visibility, owner_user_id, invite_code_hash, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
         [
           record.room.id,
           record.room.name,
+          record.room.visibility,
           record.ownerUserId,
           record.inviteCodeHash,
           record.room.createdAt,
@@ -173,10 +176,58 @@ export class PostgresRoomRepository implements RoomRepository {
 
   async findRoom(roomId: string): Promise<Room | undefined> {
     const result = await this.#pool.query<RoomRow>(
-      "SELECT id, name, created_at FROM rooms WHERE id = $1",
+      `SELECT id, name, visibility, created_at
+       FROM rooms WHERE id = $1 AND dissolved_at IS NULL`,
       [roomId],
     );
     return result.rows[0] ? mapRoom(result.rows[0]) : undefined;
+  }
+
+  async listPublicRooms(limit: number): Promise<Room[]> {
+    const result = await this.#pool.query<RoomRow>(
+      `SELECT id, name, visibility, created_at
+       FROM rooms
+       WHERE visibility = 'public' AND dissolved_at IS NULL
+       ORDER BY created_at DESC, id
+       LIMIT $1`,
+      [limit],
+    );
+    return result.rows.map(mapRoom);
+  }
+
+  async updateRoom(
+    roomId: string,
+    patch: { name?: string; visibility?: Room["visibility"] },
+  ): Promise<Room | undefined> {
+    const result = await this.#pool.query<RoomRow>(
+      `UPDATE rooms
+       SET name = COALESCE($2, name),
+           visibility = COALESCE($3, visibility)
+       WHERE id = $1 AND dissolved_at IS NULL
+       RETURNING id, name, visibility, created_at`,
+      [roomId, patch.name ?? null, patch.visibility ?? null],
+    );
+    return result.rows[0] ? mapRoom(result.rows[0]) : undefined;
+  }
+
+  async dissolveRoom(roomId: string, at: string): Promise<boolean> {
+    return this.#transaction(async (client) => {
+      const room = await client.query(
+        `UPDATE rooms SET dissolved_at = $2
+         WHERE id = $1 AND dissolved_at IS NULL`,
+        [roomId, at],
+      );
+      if (room.rowCount !== 1) {
+        return false;
+      }
+      await client.query(
+        `UPDATE room_members
+         SET token_revoked_at = $2, removed_at = $2
+         WHERE room_id = $1 AND removed_at IS NULL`,
+        [roomId, at],
+      );
+      return true;
+    });
   }
 
   async inviteCodeMatches(
@@ -184,7 +235,8 @@ export class PostgresRoomRepository implements RoomRepository {
     inviteCodeHash: string,
   ): Promise<boolean> {
     const result = await this.#pool.query(
-      "SELECT 1 FROM rooms WHERE id = $1 AND invite_code_hash = $2",
+      `SELECT 1 FROM rooms
+       WHERE id = $1 AND invite_code_hash = $2 AND dissolved_at IS NULL`,
       [roomId, inviteCodeHash],
     );
     return result.rowCount === 1;
@@ -195,7 +247,8 @@ export class PostgresRoomRepository implements RoomRepository {
     inviteCodeHash: string,
   ): Promise<void> {
     const result = await this.#pool.query(
-      "UPDATE rooms SET invite_code_hash = $1 WHERE id = $2",
+      `UPDATE rooms SET invite_code_hash = $1
+       WHERE id = $2 AND dissolved_at IS NULL`,
       [inviteCodeHash, roomId],
     );
     if (result.rowCount !== 1) {
@@ -205,7 +258,7 @@ export class PostgresRoomRepository implements RoomRepository {
 
   async addMember(record: AddMemberRecord): Promise<void> {
     try {
-      await this.#insertMember(this.#pool, record);
+      await this.#transaction((client) => this.#insertMember(client, record));
     } catch (error) {
       if (
         record.userId &&
@@ -226,6 +279,7 @@ export class PostgresRoomRepository implements RoomRepository {
       `SELECT
          r.id AS room_id,
          r.name AS room_name,
+         r.visibility AS room_visibility,
          r.created_at AS room_created_at,
          m.id AS member_id,
          m.display_name AS member_display_name,
@@ -237,6 +291,7 @@ export class PostgresRoomRepository implements RoomRepository {
        JOIN rooms r ON r.id = m.room_id
        WHERE m.user_id = $1
          AND m.removed_at IS NULL
+         AND r.dissolved_at IS NULL
        ORDER BY r.created_at DESC, r.id`,
       [userId],
     );
@@ -244,6 +299,7 @@ export class PostgresRoomRepository implements RoomRepository {
       room: {
         id: row.room_id,
         name: row.room_name,
+        visibility: row.room_visibility,
         createdAt: row.room_created_at.toISOString(),
       },
       member: {
@@ -271,7 +327,7 @@ export class PostgresRoomRepository implements RoomRepository {
     memberId: string,
   ): Promise<RoomMember | undefined> {
     const result = await this.#pool.query<MemberRow>(
-      `${memberSelect} WHERE room_id = $1 AND id = $2`,
+      `${memberSelect} WHERE room_id = $1 AND id = $2 AND removed_at IS NULL`,
       [roomId, memberId],
     );
     return result.rows[0] ? mapMember(result.rows[0]) : undefined;
@@ -280,8 +336,10 @@ export class PostgresRoomRepository implements RoomRepository {
   async isActiveMember(roomId: string, memberId: string): Promise<boolean> {
     const result = await this.#pool.query<{ exists: boolean }>(
       `SELECT EXISTS (
-         SELECT 1 FROM room_members
-         WHERE room_id = $1 AND id = $2 AND removed_at IS NULL
+         SELECT 1 FROM room_members m
+         JOIN rooms r ON r.id = m.room_id
+         WHERE m.room_id = $1 AND m.id = $2 AND m.removed_at IS NULL
+           AND r.dissolved_at IS NULL
        ) AS exists`,
       [roomId, memberId],
     );
@@ -343,7 +401,9 @@ export class PostgresRoomRepository implements RoomRepository {
   ): Promise<CreateAgentTaskResult> {
     return this.#transaction(async (client) => {
       const roomLock = await client.query(
-        "SELECT 1 FROM rooms WHERE id = $1 FOR UPDATE",
+        `SELECT 1 FROM rooms
+         WHERE id = $1 AND dissolved_at IS NULL
+         FOR UPDATE`,
         [record.message.roomId],
       );
       if (roomLock.rowCount !== 1) {
@@ -632,6 +692,15 @@ export class PostgresRoomRepository implements RoomRepository {
     client: Pick<Pool, "query"> | Pick<PoolClient, "query">,
     record: AddMemberRecord,
   ): Promise<void> {
+    const room = await client.query(
+      `SELECT 1 FROM rooms
+       WHERE id = $1 AND dissolved_at IS NULL
+       FOR UPDATE`,
+      [record.member.roomId],
+    );
+    if (room.rowCount !== 1) {
+      throw new AppError(404, "ROOM_NOT_FOUND", "Room not found");
+    }
     await client.query(
       `INSERT INTO room_members
          (id, room_id, display_name, actor_type, agent_provider, role,
@@ -658,7 +727,7 @@ export class PostgresRoomRepository implements RoomRepository {
     const sequenceResult = await client.query<{ sequence: string | number }>(
       `UPDATE rooms
        SET next_sequence = next_sequence + 1
-       WHERE id = $1
+       WHERE id = $1 AND dissolved_at IS NULL
        RETURNING next_sequence - 1 AS sequence`,
       [record.roomId],
     );
@@ -811,7 +880,12 @@ const pendingSelect = `
   JOIN room_messages m ON m.id = d.task_message_id`;
 
 function mapRoom(row: RoomRow): Room {
-  return { id: row.id, name: row.name, createdAt: iso(row.created_at) };
+  return {
+    id: row.id,
+    name: row.name,
+    visibility: row.visibility,
+    createdAt: iso(row.created_at),
+  };
 }
 
 function mapMember(row: MemberRow): RoomMember {

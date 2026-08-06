@@ -14,6 +14,17 @@ interface ApiErrorBody {
   };
 }
 
+class AgentRoomApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+    message: string,
+  ) {
+    super(`${code}: ${message}`);
+    this.name = "AgentRoomApiError";
+  }
+}
+
 export class AgentRoomClient {
   constructor(private readonly config: AgentRoomClientConfig) {}
 
@@ -78,6 +89,13 @@ export class AgentRoomClient {
       } catch (error) {
         if (!signal?.aborted) {
           console.error("AgentRoom realtime connection failed:", error);
+        }
+        if (isTerminalMembershipError(error)) {
+          console.error(
+            "AgentRoom membership is no longer active; receiver will stay stopped until the provider exits.",
+          );
+          await waitForAbort(signal);
+          return;
         }
       }
 
@@ -184,13 +202,33 @@ export class AgentRoomClient {
 
     if (!response.ok) {
       const body = (await response.json().catch(() => ({}))) as ApiErrorBody;
-      throw new Error(
-        `${body.error?.code ?? `HTTP_${response.status}`}: ${body.error?.message ?? response.statusText}`,
+      throw new AgentRoomApiError(
+        response.status,
+        body.error?.code ?? `HTTP_${response.status}`,
+        body.error?.message ?? response.statusText,
       );
     }
 
     return (await response.json()) as T;
   }
+}
+
+function isTerminalMembershipError(error: unknown): boolean {
+  return (
+    error instanceof AgentRoomApiError &&
+    (error.code === "ROOM_NOT_FOUND" ||
+      error.code === "INVALID_TOKEN" ||
+      error.code === "AUTH_REQUIRED")
+  );
+}
+
+async function waitForAbort(signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) {
+    return;
+  }
+  await new Promise<void>((resolvePromise) => {
+    signal?.addEventListener("abort", () => resolvePromise(), { once: true });
+  });
 }
 
 export function agentRoomRequestHeaders(

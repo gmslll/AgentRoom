@@ -11,7 +11,10 @@ import type {
   RealtimeTicket,
   RotateInviteResponse,
   RoomAccess,
+  Room,
+  RoomVisibility,
   SendMessageResult,
+  UpdateRoomInput,
 } from "./types";
 
 export async function listRooms(
@@ -23,10 +26,38 @@ export async function listRooms(
 export async function createRoom(
   token: string,
   name: string,
+  visibility: RoomVisibility,
 ): Promise<CreatedRoomAccess> {
   return api<CreatedRoomAccess>(
     "/v1/rooms",
-    { method: "POST", body: JSON.stringify({ name }) },
+    { method: "POST", body: JSON.stringify({ name, visibility }) },
+    { token },
+  );
+}
+
+export async function listPublicRooms(): Promise<{ items: Room[] }> {
+  return api<{ items: Room[] }>("/v1/public-rooms");
+}
+
+export async function updateRoom(
+  token: string,
+  roomId: string,
+  input: UpdateRoomInput,
+): Promise<{ room: Room }> {
+  return api<{ room: Room }>(
+    `/v1/rooms/${roomId}`,
+    { method: "PATCH", body: JSON.stringify(input) },
+    { token },
+  );
+}
+
+export async function dissolveRoom(
+  token: string,
+  roomId: string,
+): Promise<void> {
+  return api<void>(
+    `/v1/rooms/${roomId}`,
+    { method: "DELETE" },
     { token },
   );
 }
@@ -54,7 +85,6 @@ export async function listMembers(
   );
 }
 
-/** Online state derived from live WebSocket connections. */
 export async function listPresence(
   token: string,
   roomId: string,
@@ -66,13 +96,12 @@ export async function listPresence(
   );
 }
 
-/** Removes a member (owner only). The room owner cannot be removed. */
 export async function removeRoomMember(
   token: string,
   roomId: string,
   memberId: string,
 ): Promise<void> {
-  await api<void>(
+  return api<void>(
     `/v1/rooms/${roomId}/members/${memberId}`,
     { method: "DELETE" },
     { token },

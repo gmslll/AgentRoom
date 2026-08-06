@@ -49,7 +49,7 @@ Authenticated clients discover target IDs through `GET
 when the owner kicks a member, and `member.presence` when a member's online
 state changes.
 
-## Newer capabilities (contract v0.8.0)
+## Newer capabilities (contract v0.9.0)
 
 - **Files**: `POST /v1/rooms/{roomId}/files/upload-intents` returns a
   short-lived presigned PUT URL; clients upload bytes directly to S3-compatible
@@ -58,6 +58,11 @@ state changes.
   `attachmentIds`. Quota and SHA-256 verification happen on completion.
 - **Kick**: `DELETE /v1/rooms/{roomId}/members/{memberId}` (owner only) removes
   the member and revokes their token immediately.
+- **Room governance**: rooms are `private` by default. Owners can rename or
+  publish them with `PATCH /v1/rooms/{roomId}`; `GET /v1/public-rooms` is the
+  public directory and public rooms accept joins without `inviteCode`.
+  `DELETE /v1/rooms/{roomId}` dissolves a room, revokes every member, and emits
+  `room.dissolved` so connected clients leave immediately.
 - **Presence**: `GET /v1/rooms/{roomId}/presence` plus `member.presence` events.
   WebSocket connections keep the presence key alive; closing or crashing clears
   it within the TTL.

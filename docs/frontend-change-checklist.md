@@ -12,10 +12,18 @@
 
 ## 现在需要调整
 
+- `Room` 增加 `visibility: "private" | "public"`。创建时可选择；owner 通过
+  `PATCH /v1/rooms/{roomId}` 改名或切换公开性。
+- 接入 `GET /v1/public-rooms`。公开房间可省略 `inviteCode`；私有房间
+  仍必须提供邀请码。
+- owner 解散使用 `DELETE /v1/rooms/{roomId}`。处理 `room.updated` 和
+  `room.dissolved`；解散事件到达后立即清理状态并返回房间列表。
+
 - delivery 文案使用：`queued`“等待终端”、`received`“已送达终端”、`running`
   “AI 处理中”、`replied`“已回复”、`failed`“执行失败”。`received` 不等于“AI 已读”。
 - 进入房间时请求 `GET /v1/rooms/{roomId}/presence`，并实时处理
-  `member.presence`；不要根据成员列表猜在线状态。
+  `member.presence`；建议每 30 秒校准快照，在线和离线均明确展示，不要根据成员列表
+  猜在线状态。
 - 处理 `member.removed`。当前成员被移除时关闭 WebSocket、清理房间状态并返回房间
   列表；其他成员被移除时更新成员和 presence 列表。
 - owner 成员管理页接入

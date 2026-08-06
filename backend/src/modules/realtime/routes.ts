@@ -73,7 +73,17 @@ export function registerRealtimeRoutes(
             event.type === "member.removed" &&
             event.data.memberId === member.id
           ) {
+            if (socket.readyState === 1) {
+              socket.send(JSON.stringify(event));
+            }
             socket.close(1008, "Removed from room");
+            return;
+          }
+          if (event.type === "room.dissolved") {
+            if (socket.readyState === 1) {
+              socket.send(JSON.stringify(event));
+            }
+            socket.close(1008, "Room dissolved");
             return;
           }
           if (socket.readyState === 1) {
