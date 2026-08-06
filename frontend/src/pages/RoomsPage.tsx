@@ -102,7 +102,7 @@ export default function RoomsPage() {
               <button
                 type="button"
                 onClick={() => navigate(`/rooms/${room.id}`)}
-                className="surface-panel press group flex w-full items-center justify-between rounded-lg px-4 py-3 text-left transition-colors hover:border-border-strong hover:bg-surface-raised"
+                className="press group flex w-full items-center justify-between rounded-lg border border-border-strong bg-surface px-4 py-3 text-left shadow-sm transition-all hover:-translate-y-px hover:border-primary/50 hover:shadow-md"
               >
                 <span className="min-w-0">
                   <span className="block truncate font-medium text-text">
