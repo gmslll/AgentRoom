@@ -135,6 +135,15 @@ export function ConnectPanel({
                 新邀请码已生成,旧邀请码立即失效。
               </p>
             )}
+            <div className="flex items-center gap-2">
+              <CopyButton
+                text={`${window.location.origin}/rooms/${roomId}`}
+                label="复制邀请链接"
+              />
+              <span className="text-xs text-muted">
+                分享给他人:打开链接后用上面的邀请码加入
+              </span>
+            </div>
           </div>
 
           {waitingForAgent && (
