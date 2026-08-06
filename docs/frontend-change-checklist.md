@@ -64,9 +64,16 @@ session-card 是目标电脑 `.agentroom/` 下的本地可靠性证据。它没�
 - owner 审核规则：`flag` 结果可在消息上显示，`reject` 发送失败按业务错误展示。
 - AgentRoom CLI 面板继续直接使用接口返回的 `connector.command`、
   `connector.attachCommand` 和 `connector.installers`，不要手拼下载 URL 或命令。
+- 增加“让当前 AI 自己接入”复制按钮，按
+  [`frontend-backend-integration.md`](./frontend-backend-integration.md#已有会话的一句话自助接入)
+  的模板临时拼接已有会话提示词。私有房间只有在本页仍持有邀请码时才能生成；完整提示
+  词不得缓存、埋点或进入错误上报。公开房间使用 `--public`。
 - CLI 成功提示改为“完成交互后会注入房间信息并自动启动对应 Claude/Codex”，不要再
   要求用户复制第二条启动命令或常驻执行 `agentroom run --config ...`。只配置不启动
   时提示追加 `--no-launch`；稍后用 CLI 输出的 `agentroom start --config <PATH>` 进入。
+- 已运行会话的自助接入必须固定使用 `attach ... --session last --no-launch`；提示用户
+  AI 完成安装和配置后仍要退出当前 Claude/Codex 一次，再执行它返回的完整 `start`
+  命令。不要让当前 AI 在工具调用中启动嵌套 provider。
 - 安装说明写明同一系统用户的 Claude/Codex 共用一份用户级全局 CLI，并提供
   `agentroom update`；同时说明 Provider MCP 启动会自动校验并更新。旧配置用
   `agentroom configure --config <PATH>` 原地迁移。

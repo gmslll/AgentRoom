@@ -318,6 +318,23 @@ agentroom attach room_replace_me \
   --session last
 ```
 
+An AI that is already running can prepare its own installation and attachment,
+but it cannot hot-load a new Claude Channel or Codex MCP into its parent
+process. Give the current local AI one trusted prompt that tells it to download
+the matching installer if `agentroom` is missing, then run the fully specified
+`agentroom attach ... --session last --no-launch` command. It must not launch a
+nested provider from its shell tool. After it reports the generated
+`agentroom start --config ...` command, exit the original provider once and run
+that command to resume the same conversation with AgentRoom enabled. A private
+room prompt necessarily contains its invite code, so it must stay in the
+trusted local AI session and must not be logged or shared.
+
+For Codex, deferred `attach --no-launch` may select the thread that is still
+loaded by the current CLI. It records the thread without starting a competing
+App Server. The later `agentroom start` strictly resumes that thread and runs
+the visible connection bootstrap after the original CLI has exited. Without
+`--no-launch`, the existing loaded/busy-thread guard remains in effect.
+
 For Codex, `attach` lists saved interactive threads in the current workspace,
 strictly resumes the selected thread through App Server, stores its thread ID
 in a member-scoped `.agentroom/` state file, injects one visible connection

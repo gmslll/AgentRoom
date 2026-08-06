@@ -5,6 +5,7 @@ import { dirname } from "node:path";
 export interface CodexBridgeState {
   threadId: string;
   resumeRequired?: true;
+  connectionBootstrapPending?: true;
 }
 
 export async function loadCodexState(
@@ -22,6 +23,9 @@ export async function loadCodexState(
       return {
         threadId: value.threadId,
         ...(record.resumeRequired === true ? { resumeRequired: true } : {}),
+        ...(record.connectionBootstrapPending === true
+          ? { connectionBootstrapPending: true }
+          : {}),
       };
     }
     return undefined;

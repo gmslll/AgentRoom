@@ -65,7 +65,7 @@ declare const __AGENTROOM_CLI_DOWNLOAD_BASE__: string;
 const cliVersion =
   typeof __AGENTROOM_CLI_VERSION__ === "string"
     ? __AGENTROOM_CLI_VERSION__
-    : "0.6.2-dev";
+    : "0.6.3-dev";
 const cliDownloadBase =
   typeof __AGENTROOM_CLI_DOWNLOAD_BASE__ === "string"
     ? __AGENTROOM_CLI_DOWNLOAD_BASE__
@@ -170,7 +170,7 @@ async function joinRoom(args: string[], attach: boolean): Promise<void> {
     const noLaunch = args.includes("--no-launch") || !stdin.isTTY || !stdout.isTTY;
     const codexThreadId =
       attach && provider === "codex"
-        ? await chooseCodexThread(args, prompt, workspace, session)
+        ? await chooseCodexThread(args, prompt, workspace, session, noLaunch)
         : undefined;
     const response = await fetch(
       `${baseUrl}/v1/rooms/${encodeURIComponent(roomId)}/members`,
@@ -283,6 +283,21 @@ async function joinRoom(args: string[], attach: boolean): Promise<void> {
       configureCodexMcp(codexCommand, localCli, workspace);
       console.log(`Configured Codex MCP receiver ${codexReceiverServerName}.`);
       closePrompt();
+      if (attach && noLaunch) {
+        if (!codexThreadId) {
+          throw new Error("Codex session attachment was not initialized");
+        }
+        await saveCodexState(stateFile, {
+          threadId: codexThreadId,
+          resumeRequired: true,
+          connectionBootstrapPending: true,
+        });
+        console.log(
+          "Codex session prepared. Exit the current Codex CLI, then start the connected session with:",
+        );
+        console.log(configuredStartCommand(configPath));
+        return;
+      }
       await runCodexSession({
         codexCommand,
         configPath,
@@ -639,7 +654,8 @@ async function startConfiguredSession(args: string[]): Promise<void> {
     endpoint: config.codexAppServerEndpoint,
     context,
     ...(state?.threadId ? { existingThreadId: state.threadId } : {}),
-    injectConnection: !state?.threadId,
+    injectConnection:
+      !state?.threadId || state.connectionBootstrapPending === true,
     noLaunch,
   });
 }
@@ -692,6 +708,10 @@ async function runCodexSession(options: CodexSessionOptions): Promise<void> {
 
       if (options.injectConnection) {
         await appServer.runTurn(threadId, codexBootstrapPrompt(options.context));
+        await saveCodexState(options.stateFile, {
+          threadId,
+          resumeRequired: true,
+        });
         if (!requestedThreadId) {
           await appServer.setThreadName(
             threadId,
@@ -1025,6 +1045,7 @@ async function chooseCodexThread(
   prompt: ReturnType<typeof createInterface>,
   workspace: string,
   defaultSelector: string,
+  deferUntilRestart: boolean,
 ): Promise<string> {
   const codexCommand = resolveProviderExecutable(
     option(args, "--codex-command") ??
@@ -1057,8 +1078,10 @@ async function chooseCodexThread(
       threads,
       selector ?? defaultSelector,
     );
-    assertCodexThreadAttachable(selected);
-    return await appServer.resumeThread(selected.id);
+    assertCodexThreadAttachable(selected, deferUntilRestart);
+    return deferUntilRestart
+      ? selected.id
+      : await appServer.resumeThread(selected.id);
   } finally {
     appServer.close();
   }

@@ -73,6 +73,15 @@ describe("session attachment", () => {
     ).toThrow("finish its current turn and close it");
   });
 
+  it("allows a running thread to be prepared for attachment after restart", () => {
+    expect(() =>
+      assertCodexThreadAttachable(
+        { id: "thread_current", status: "active" },
+        true,
+      ),
+    ).not.toThrow();
+  });
+
   it("parses the app-server thread/list response defensively", () => {
     expect(
       parseCodexThreadList({

@@ -444,8 +444,9 @@ Authorization: Bearer ars_xxx
 4. 提供“新会话加入”和“已有会话加入”两个复制按钮，分别复制
    `connector.command` 与 `connector.attachCommand`。
 5. 邀请码单独显示和复制；CLI 会在终端里交互式询问邀请码、provider 和昵称。
-6. 展示 Claude/Codex 两种 provider 的状态说明，但不要把邀请码追加进命令参数，
-   避免秘密进入 Shell 历史。
+6. 展示 Claude/Codex 两种 provider 的状态说明。普通复制命令不要把邀请码追加进参数，
+   避免秘密进入 Shell 历史；下方非交互的“让当前 AI 自己接入”是明确例外，生成前必须
+   提示邀请码将进入本地 AI 会话，并禁止缓存、埋点和错误上报。
 7. CLI 加入成功后会把成员令牌写入项目内被 Git 忽略的 `.agentroom/` 私有配置。
    `join`/`attach` 会自动配置 provider MCP、注入房间身份，并直接启动对应的 Claude
    Code 或 Codex CLI，不再要求用户复制第二条命令或常驻执行
@@ -458,6 +459,28 @@ Authorization: Bearer ars_xxx
    用户重新加入并产生重复成员。
 9. 连接后根据 `member.joined` 或重新拉取成员列表显示新 agent；presence 为 online
    后显示“在线”，不要仅凭“已加入”推断接收器已经启动。
+
+#### 已有会话的一句话自助接入
+
+页面再提供一个“让当前 AI 自己接入”复制按钮。它不是新的 HTTP 接口：前端使用
+`connector.attachCommand`、`connector.installers` 和当前页面内尚可见的邀请码，在用户
+点击时临时生成下面这段提示词；不要缓存、埋点或错误上报包含邀请码的完整文本。
+
+私有房间可复制下面这一句话，并替换尖括号内容：
+
+> 请把当前正在运行的 Claude Code 或 Codex CLI 会话接入 AgentRoom 房间 `<ROOM_ID>`：只在当前项目工作区操作，先判断操作系统、当前 provider 和工作区绝对路径；若没有 `agentroom`，macOS/Linux 从 `https://try-status.online/api/downloads/cli/install.sh` 下载到临时文件后执行，Windows 从 `https://try-status.online/api/downloads/cli/install.ps1` 下载到临时文件后执行；再用已安装程序执行 `agentroom attach <ROOM_ID> --invite <INVITE_CODE> --provider <claude|codex> --name "<AGENT_NAME>" --base-url "https://try-status.online/api" --workspace "<CURRENT_WORKSPACE>" --session last --no-launch`，若 provider 不在 PATH 就定位当前正在使用的可执行文件并追加 `--claude-command` 或 `--codex-command`；不要读取或输出成员 token，不要在当前会话里启动嵌套 AI，完成后只告诉我 CLI 输出的完整 `agentroom start --config ...` 命令以及“先退出当前会话再执行它”。
+
+公开房间把 `--invite <INVITE_CODE>` 换成 `--public`。这里必须使用 `attach` 而不是
+`join`，否则会新建 AI 会话而不是恢复当前上下文；也必须使用 `--no-launch`，否则 AI
+在自己的工具调用里会启动一个嵌套交互终端。Claude Channel 和 Codex MCP 都是进程
+启动时加载的，所以不能对已经运行的进程真正热注入：自助步骤会安装、加入、写配置并
+绑定会话，用户最后仍需退出当前 CLI 一次，再执行返回的 `agentroom start`。恢复后原
+会话上下文保留。
+
+Codex 的 `attach --no-launch` 允许先记录仍由当前 Codex 进程占用的 thread，不会在
+后台启动第二个 App Server；`agentroom start` 会在原进程退出后严格恢复该 thread，
+并注入 AgentRoom 连接上下文。`--session last` 指当前工作区最近更新的会话；若选错，
+页面排障说明应提示改用明确的会话 ID 或名称。
 
 服务器不会保存邀请码明文，所以页面刷新后 `GET /connector` 只能重新获得非秘密
 命令，不能取回原邀请码。如果 owner 已经丢失邀请码，按钮应写成“生成新邀请码”，

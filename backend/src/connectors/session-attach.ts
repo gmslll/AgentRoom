@@ -56,7 +56,15 @@ export function resolveCodexThread(
 
 export function assertCodexThreadAttachable(
   thread: CodexThreadSummary,
+  deferred = false,
 ): void {
+  // `attach --no-launch` is intentionally allowed to record a thread that is
+  // still owned by the caller's current Codex process. No second host is
+  // started in that flow; the user exits the original process before running
+  // the printed `agentroom start` command.
+  if (deferred) {
+    return;
+  }
   if (thread.status && thread.status !== "notLoaded") {
     throw new Error(
       `Codex session ${thread.id} is ${thread.status}; finish its current turn and close it before attaching`,

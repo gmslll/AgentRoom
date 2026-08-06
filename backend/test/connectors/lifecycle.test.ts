@@ -9,7 +9,10 @@ import {
 } from "../../src/connectors/agentroom-client.js";
 import { CodexAppServerClient } from "../../src/connectors/codex/app-server-client.js";
 import { CodexTaskRunner } from "../../src/connectors/codex/runner.js";
-import { saveCodexState } from "../../src/connectors/codex/state.js";
+import {
+  loadCodexState,
+  saveCodexState,
+} from "../../src/connectors/codex/state.js";
 import type { PendingAgentDelivery } from "../../src/protocol/rooms.js";
 
 const temporaryDirectories: string[] = [];
@@ -25,6 +28,24 @@ afterEach(async () => {
 });
 
 describe("bridge lifecycle", () => {
+  it("persists the deferred connection bootstrap marker", async () => {
+    const stateDirectory = await mkdtemp(join(tmpdir(), "agentroom-deferred-"));
+    temporaryDirectories.push(stateDirectory);
+    const stateFile = join(stateDirectory, "state.json");
+
+    await saveCodexState(stateFile, {
+      threadId: "thread_current",
+      resumeRequired: true,
+      connectionBootstrapPending: true,
+    });
+
+    await expect(loadCodexState(stateFile)).resolves.toEqual({
+      threadId: "thread_current",
+      resumeRequired: true,
+      connectionBootstrapPending: true,
+    });
+  });
+
   it("does not declare an empty realtime-ticket request as JSON", () => {
     const emptyPost = agentRoomRequestHeaders("art_member");
     expect(emptyPost.get("authorization")).toBe("Bearer art_member");

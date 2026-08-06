@@ -122,6 +122,14 @@ so an already open Claude process must exit before it is attached.
 Resuming preserves the conversation; starting the same session concurrently in
 two terminals is unsupported by the AgentRoom workflow.
 
+For self-onboarding from inside an already running provider, use a fully
+specified `agentroom attach ... --session last --no-launch` command. The current
+AI may install the user-level CLI and write its room/provider configuration,
+but it must return the printed `agentroom start --config ...` command instead
+of launching a nested interactive provider. The user exits the original
+process once and runs that command; this restart is required to load the new
+Channel/MCP while preserving the selected conversation.
+
 Before the Channel MCP claims stdio, the globally installed CLI compares its
 own bundle hash with the no-cache release manifest. A mismatch is downloaded,
 size/SHA-256 verified, atomically installed, and relaunched on the same stdio
@@ -186,6 +194,13 @@ accidentally share a thread.
 is then closed before the session-scoped App Server becomes the long-running
 host. An attached state is marked `resumeRequired`; a missing or invalid thread
 fails closed instead of falling back to `thread/start`.
+
+The deferred `attach --no-launch` path is the exception to the immediate
+`thread/resume` step: it may select a thread reported as loaded by the current
+Codex CLI, persists `connectionBootstrapPending`, and starts no session host.
+After the original CLI exits, `agentroom start` strictly resumes that thread,
+injects the connection bootstrap once, and clears the pending marker. A normal
+attach that launches immediately still rejects loaded or busy threads.
 
 `codex exec resume` remains a possible fallback for one-shot automation, but
 App Server is the primary integration because it preserves a long-lived thread
