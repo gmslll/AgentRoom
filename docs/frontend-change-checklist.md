@@ -7,6 +7,8 @@
 为准。
 
 线上 API 基址固定为 `https://try-status.online/api`，根域名 `/` 留给前端。
+推送 `release-vX.Y.Z` 标签时，同一个 GitHub Actions release 会用该 API 基址构建
+前端，并把 `frontend/dist` 与同提交的后端一起原子部署到服务器；前端不需要单独发布。
 
 ## 现在需要调整
 

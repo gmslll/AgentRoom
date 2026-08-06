@@ -41,7 +41,9 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: backend/package-lock.json
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
 
       - name: Install backend dependencies
         run: npm --prefix backend ci
@@ -55,6 +57,23 @@ jobs:
       - name: Build backend and CLI release
         run: npm --prefix backend run build
 
+      - name: Install frontend dependencies
+        run: npm --prefix frontend ci
+
+      - name: Lint frontend
+        run: npm --prefix frontend run lint
+
+      - name: Type-check frontend
+        run: npm --prefix frontend run typecheck
+
+      - name: Test frontend
+        run: npm --prefix frontend test
+
+      - name: Build frontend
+        env:
+          VITE_API_BASE_URL: https://try-status.online/api
+        run: npm --prefix frontend run build
+
   deploy:
     name: Deploy to try-status.online
     if: github.event.deleted == false
@@ -63,7 +82,7 @@ jobs:
     timeout-minutes: 45
     environment:
       name: production
-      url: https://try-status.online/api/health
+      url: https://try-status.online
     steps:
       - name: Check out tagged commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -105,13 +124,15 @@ jobs:
             printf 'AGENTROOM_DEPLOY_REF=%s\n' "$GITHUB_SHA"
             printf 'AGENTROOM_PUBLIC_BASE_URL=%s\n' \
               'https://try-status.online/api'
+            printf 'AGENTROOM_FRONTEND_PUBLIC_URL=%s\n' \
+              'https://try-status.online'
             printf 'AGENTROOM_SSH_IDENTITY_FILE=%s\n' \
               "$ssh_dir/id_ed25519"
             printf 'AGENTROOM_SSH_KNOWN_HOSTS_FILE=%s\n' \
               "$ssh_dir/known_hosts"
           } >>"$GITHUB_ENV"
 
-      - name: Deploy immutable backend release
+      - name: Deploy immutable application release
         run: ./backend/deploy/deploy.sh
 
       - name: Record deployment summary
@@ -122,6 +143,7 @@ jobs:
             printf '## AgentRoom production deployment\n\n'
             printf -- '- Tag: `%s`\n' "$GITHUB_REF_NAME"
             printf -- '- Commit: `%s`\n' "$GITHUB_SHA"
+            printf -- '- Frontend: https://try-status.online\n'
             printf -- '- Health: https://try-status.online/api/health\n'
             printf -- '- Swagger: https://try-status.online/api/docs\n'
           } >>"$GITHUB_STEP_SUMMARY"

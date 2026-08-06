@@ -10,6 +10,7 @@ DEPLOY_HOST=${AGENTROOM_DEPLOY_HOST:-root@159.75.105.5}
 DEPLOY_REF=${AGENTROOM_DEPLOY_REF:-HEAD}
 DEPLOY_ROOT=${AGENTROOM_DEPLOY_ROOT:-/opt/agentroom}
 PUBLIC_BASE_URL=${AGENTROOM_PUBLIC_BASE_URL:-https://try-status.online/api}
+FRONTEND_PUBLIC_URL=${AGENTROOM_FRONTEND_PUBLIC_URL:-https://try-status.online}
 POSTGRES_CONTAINER=${AGENTROOM_POSTGRES_CONTAINER:-agentroom-postgres}
 POSTGRES_USER=${AGENTROOM_POSTGRES_USER:-agentroom}
 POSTGRES_DATABASE=${AGENTROOM_POSTGRES_DATABASE:-agentroom}
@@ -28,7 +29,7 @@ SSH_OPTIONS=(
 
 usage() {
   cat <<'EOF'
-Deploy the committed AgentRoom backend release to production.
+Deploy the committed AgentRoom frontend and backend release to production.
 
 Usage:
   backend/deploy/deploy.sh [options]
@@ -37,6 +38,7 @@ Options:
   --host <user@host>       SSH destination (default: root@159.75.105.5)
   --ref <git-ref>          Commit or ref to deploy (default: HEAD)
   --public-url <url>       Public backend base URL
+  --frontend-url <url>     Public frontend URL
   --skip-db-backup         Skip the pre-deployment PostgreSQL dump
   --dry-run                Validate and print the resolved deployment only
   -h, --help               Show this help
@@ -46,6 +48,7 @@ Environment overrides:
   AGENTROOM_DEPLOY_REF
   AGENTROOM_DEPLOY_ROOT
   AGENTROOM_PUBLIC_BASE_URL
+  AGENTROOM_FRONTEND_PUBLIC_URL
   AGENTROOM_POSTGRES_CONTAINER
   AGENTROOM_POSTGRES_USER
   AGENTROOM_POSTGRES_DATABASE
@@ -82,6 +85,11 @@ while [[ $# -gt 0 ]]; do
     --public-url)
       [[ $# -ge 2 ]] || fail "--public-url requires a value"
       PUBLIC_BASE_URL=$2
+      shift 2
+      ;;
+    --frontend-url)
+      [[ $# -ge 2 ]] || fail "--frontend-url requires a value"
+      FRONTEND_PUBLIC_URL=$2
       shift 2
       ;;
     --skip-db-backup)
@@ -133,6 +141,8 @@ DEPLOY_ROOT=${DEPLOY_ROOT%/}
   fail "Unsafe DEPLOY_ROOT: $DEPLOY_ROOT"
 [[ "$PUBLIC_BASE_URL" =~ ^https?://[A-Za-z0-9.-]+(:[0-9]+)?(/[A-Za-z0-9._~/%-]*)?/?$ ]] ||
   fail "PUBLIC_BASE_URL must be an HTTP(S) URL without query, hash, or credentials"
+[[ "$FRONTEND_PUBLIC_URL" =~ ^https?://[A-Za-z0-9.-]+(:[0-9]+)?/?$ ]] ||
+  fail "FRONTEND_PUBLIC_URL must be an HTTP(S) origin without a path, query, hash, or credentials"
 [[ "$POSTGRES_CONTAINER" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] ||
   fail "Unsafe PostgreSQL container name"
 [[ "$POSTGRES_USER" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]*$ ]] ||
@@ -141,6 +151,7 @@ DEPLOY_ROOT=${DEPLOY_ROOT%/}
   fail "Unsafe PostgreSQL database"
 
 PUBLIC_BASE_URL=${PUBLIC_BASE_URL%/}
+FRONTEND_PUBLIC_URL=${FRONTEND_PUBLIC_URL%/}
 
 cd "$REPOSITORY_ROOT"
 
@@ -159,6 +170,7 @@ REMOTE_LOCK_ACQUIRED=0
 log "Host: $DEPLOY_HOST"
 log "Commit: $DEPLOY_COMMIT"
 log "Public URL: $PUBLIC_BASE_URL"
+log "Frontend URL: $FRONTEND_PUBLIC_URL"
 
 if [[ "$DRY_RUN" -eq 1 ]]; then
   log "Dry run complete; no remote changes were made."
@@ -211,7 +223,7 @@ release_lock_on_failure() {
 trap release_lock_on_failure EXIT
 
 [[ $(id -u) -eq 0 ]] || { echo "Deployment SSH user must be root" >&2; exit 1; }
-for command_name in docker sudo systemctl curl tar; do
+for command_name in docker sudo systemctl curl tar nginx; do
   command -v "$command_name" >/dev/null 2>&1 || {
     echo "Missing server command: $command_name" >&2
     exit 1
@@ -221,6 +233,16 @@ done
 [[ -x /usr/local/bin/npm ]] || { echo "/usr/local/bin/npm is missing" >&2; exit 1; }
 id agentroom >/dev/null 2>&1 || { echo "System user agentroom is missing" >&2; exit 1; }
 [[ -r /etc/agentroom/backend.env ]] || { echo "/etc/agentroom/backend.env is missing" >&2; exit 1; }
+[[ -L /etc/nginx/sites-enabled/try-status.online ]] || {
+  echo "The try-status.online Nginx site is not enabled" >&2
+  exit 1
+}
+[[ $(readlink -f /etc/nginx/sites-enabled/try-status.online) == \
+    /etc/nginx/sites-available/try-status.online ]] || {
+  echo "The enabled try-status.online Nginx site points to an unexpected file" >&2
+  exit 1
+}
+nginx -t >/dev/null
 
 configured_public_url=$(sed -n 's/^PUBLIC_BASE_URL=//p' /etc/agentroom/backend.env)
 [[ "$configured_public_url" == "$public_base_url" ]] || {
@@ -261,6 +283,14 @@ if [[ -e "$release_dir" ]]; then
     echo "Existing release has no packaged CLI" >&2
     exit 1
   }
+  [[ -f "$release_dir/frontend/dist/index.html" ]] || {
+    echo "Existing release has no compiled frontend" >&2
+    exit 1
+  }
+  [[ -f "$release_dir/backend/deploy/nginx/try-status.online.conf" ]] || {
+    echo "Existing release has no Nginx site configuration" >&2
+    exit 1
+  }
   printf 'reuse\n'
 else
   install -d -m 0755 -o agentroom -g agentroom "$staging_dir"
@@ -294,6 +324,11 @@ sudo -u agentroom env \
   AGENTROOM_CLI_DOWNLOAD_BASE="$public_base_url/downloads/cli" \
   /usr/local/bin/npm --prefix "$staging_dir/backend" run build
 sudo -u agentroom /usr/local/bin/npm --prefix "$staging_dir/backend" prune --omit=dev
+sudo -u agentroom /usr/local/bin/npm --prefix "$staging_dir/frontend" ci
+sudo -u agentroom env \
+  VITE_API_BASE_URL="$public_base_url" \
+  /usr/local/bin/npm --prefix "$staging_dir/frontend" run build
+sudo -u agentroom /usr/local/bin/npm --prefix "$staging_dir/frontend" prune --omit=dev
 
 [[ -f "$staging_dir/backend/dist/api/server.js" ]]
 [[ -f "$staging_dir/backend/dist/database/migrate.js" ]]
@@ -307,6 +342,10 @@ cli_bundle=$(/usr/local/bin/node -e \
 [[ "$cli_bundle" =~ ^[A-Za-z0-9._-]+$ ]]
 [[ -f "$staging_dir/backend/artifacts/cli/$cli_bundle" ]]
 [[ -f "$staging_dir/shared/contracts/http/openapi.yaml" ]]
+[[ -f "$staging_dir/frontend/dist/index.html" ]]
+compgen -G "$staging_dir/frontend/dist/assets/*.js" >/dev/null
+grep -R -Fq "$public_base_url" "$staging_dir/frontend/dist"
+[[ -f "$staging_dir/backend/deploy/nginx/try-status.online.conf" ]]
 
 printf '%s\n' "$deploy_commit" >"$staging_dir/.agentroom-release"
 chmod 0444 "$staging_dir/.agentroom-release"
@@ -348,30 +387,41 @@ else
   log "Database backup skipped by explicit request."
 fi
 
-log "Switching the service and running local/public health checks..."
+log "Switching the frontend and backend and running health checks..."
 ssh "${SSH_OPTIONS[@]}" "$DEPLOY_HOST" bash -s -- \
-  "$DEPLOY_ROOT" "$RELEASE_DIR" "$DEPLOY_COMMIT" "$PUBLIC_BASE_URL" <<'REMOTE_SWITCH'
+  "$DEPLOY_ROOT" "$RELEASE_DIR" "$DEPLOY_COMMIT" \
+  "$PUBLIC_BASE_URL" "$FRONTEND_PUBLIC_URL" <<'REMOTE_SWITCH'
 set -Eeuo pipefail
 deploy_root=$1
 release_dir=$2
 deploy_commit=$3
 public_base_url=$4
+frontend_public_url=$5
 service_name=agentroom.service
+nginx_service=nginx.service
 unit_path=/etc/systemd/system/agentroom.service
+nginx_site_path=/etc/nginx/sites-available/try-status.online
 old_release=$(readlink -f "$deploy_root/current" 2>/dev/null || true)
 timestamp=$(date -u +%Y%m%dT%H%M%SZ)
 unit_backup="$deploy_root/backups/systemd-$timestamp-${deploy_commit:0:12}.service"
+nginx_site_backup="$deploy_root/backups/nginx-$timestamp-${deploy_commit:0:12}.conf"
 had_unit=0
+had_nginx_site=0
 
 if [[ -f "$unit_path" ]]; then
   cp -a "$unit_path" "$unit_backup"
   had_unit=1
+fi
+if [[ -f "$nginx_site_path" ]]; then
+  cp -a "$nginx_site_path" "$nginx_site_backup"
+  had_nginx_site=1
 fi
 
 rollback() {
   local reason=$1
   echo "Deployment check failed: $reason" >&2
   journalctl -u "$service_name" -n 60 --no-pager >&2 || true
+  journalctl -u "$nginx_service" -n 30 --no-pager >&2 || true
   if [[ -n "$old_release" ]]; then
     rollback_link="$deploy_root/.current-rollback-$$"
     ln -s "$old_release" "$rollback_link"
@@ -384,22 +434,35 @@ rollback() {
   else
     rm -f -- "$unit_path"
   fi
+  if [[ "$had_nginx_site" -eq 1 ]]; then
+    cp -a "$nginx_site_backup" "$nginx_site_path"
+  else
+    rm -f -- "$nginx_site_path"
+  fi
   systemctl daemon-reload
   if [[ -n "$old_release" ]]; then
     systemctl restart "$service_name" || true
   else
     systemctl stop "$service_name" || true
   fi
+  if nginx -t; then
+    systemctl reload "$nginx_service" || true
+  fi
   exit 1
 }
 
 install -m 0644 "$release_dir/backend/deploy/systemd/agentroom.service" "$unit_path"
+install -m 0644 \
+  "$release_dir/backend/deploy/nginx/try-status.online.conf" \
+  "$nginx_site_path"
+nginx -t || rollback "nginx configuration"
 next_link="$deploy_root/.current-$deploy_commit-$$"
 ln -s "$release_dir" "$next_link"
 mv -Tf "$next_link" "$deploy_root/current"
 systemctl daemon-reload
 systemctl enable "$service_name" >/dev/null
 systemctl restart "$service_name" || rollback "systemd restart"
+systemctl reload "$nginx_service" || rollback "nginx reload"
 
 healthy=0
 attempt=1
@@ -433,6 +496,28 @@ while [[ "$attempt" -le 10 ]]; do
 done
 [[ "$public_healthy" -eq 1 ]] || rollback "public API, OpenAPI, or CLI download endpoint"
 
+frontend_healthy=0
+attempt=1
+while [[ "$attempt" -le 10 ]]; do
+  frontend_html=$(curl --max-time 8 --silent --fail \
+    "$frontend_public_url/" 2>/dev/null || true)
+  deep_link_html=$(curl --max-time 8 --silent --fail \
+    "$frontend_public_url/rooms" 2>/dev/null || true)
+  asset_path=$(printf '%s' "$frontend_html" |
+    sed -n 's/.*src="\([^"]*\.js\)".*/\1/p' | head -n 1)
+  if printf '%s' "$frontend_html" | grep -Fq '<div id="root"></div>' &&
+    printf '%s' "$deep_link_html" | grep -Fq '<div id="root"></div>' &&
+    [[ "$asset_path" =~ ^/assets/[A-Za-z0-9._-]+\.js$ ]] &&
+    curl --max-time 8 --silent --fail \
+      "$frontend_public_url$asset_path" >/dev/null; then
+    frontend_healthy=1
+    break
+  fi
+  sleep 1
+  attempt=$((attempt + 1))
+done
+[[ "$frontend_healthy" -eq 1 ]] || rollback "frontend root, deep link, or JavaScript asset"
+
 if [[ -n "$old_release" && "$old_release" != "$release_dir" ]]; then
   previous_link="$deploy_root/.previous-$deploy_commit-$$"
   ln -s "$old_release" "$previous_link"
@@ -440,6 +525,7 @@ if [[ -n "$old_release" && "$old_release" != "$release_dir" ]]; then
 fi
 
 systemctl is-active --quiet "$service_name" || rollback "final service state"
+systemctl is-active --quiet "$nginx_service" || rollback "final nginx state"
 actual_previous=$(readlink -f "$deploy_root/previous" 2>/dev/null || true)
 printf 'release=%s\n' "$release_dir"
 printf 'previous=%s\n' "${actual_previous:-none}"
