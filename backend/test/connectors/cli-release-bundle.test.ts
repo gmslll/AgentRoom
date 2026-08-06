@@ -53,6 +53,17 @@ describe("packaged AgentRoom CLI", () => {
           outputDirectory,
           manifest.files.bundle.name,
         );
+        const help = spawnSync(process.execPath, [bundlePath, "--help"], {
+          cwd: directory,
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            AGENTROOM_DISABLE_AUTO_UPDATE: "true",
+          },
+        });
+        expect(help.status, help.stderr).toBe(0);
+        expect(help.stdout).toContain("agentroom send --config PATH --text TEXT");
+        expect(help.stdout).toContain("agentroom history --config PATH");
         await mkdir(dirname(configPath), { recursive: true });
         await writeFile(
           configPath,

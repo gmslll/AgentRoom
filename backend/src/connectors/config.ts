@@ -12,6 +12,7 @@ export interface AgentRoomClientConfig {
 export interface AgentRoomBridgeConfig extends AgentRoomClientConfig {
   workspace: string;
   sessionCardRoot: string;
+  receiverStatusFile?: string;
   memberId?: string;
   displayName?: string;
 }
@@ -57,6 +58,9 @@ export function loadAgentRoomBridgeConfig(
       env.AGENTROOM_SESSION_CARD_ROOT ??
         resolve(workspace, ".agentroom", "session-cards"),
     ),
+    ...(env.AGENTROOM_RECEIVER_STATUS_FILE
+      ? { receiverStatusFile: resolve(env.AGENTROOM_RECEIVER_STATUS_FILE) }
+      : {}),
     httpTimeoutMs: positiveInteger(
       env.AGENTROOM_HTTP_TIMEOUT_MS,
       15_000,

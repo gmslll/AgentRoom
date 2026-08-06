@@ -51,6 +51,9 @@ import {
   resolveCredentialStoreKind,
 } from "./secret-store.js";
 import { updateInstalledCli } from "./self-update.js";
+import { receiverStatusPath } from "./receiver-status.js";
+import { AgentRoomClient } from "./agentroom-client.js";
+import { resolveProviderExecutable } from "./provider-executable.js";
 
 declare const __AGENTROOM_CLI_VERSION__: string;
 declare const __AGENTROOM_CLI_DOWNLOAD_BASE__: string;
@@ -58,7 +61,7 @@ declare const __AGENTROOM_CLI_DOWNLOAD_BASE__: string;
 const cliVersion =
   typeof __AGENTROOM_CLI_VERSION__ === "string"
     ? __AGENTROOM_CLI_VERSION__
-    : "0.4.0-dev";
+    : "0.4.1-dev";
 const cliDownloadBase =
   typeof __AGENTROOM_CLI_DOWNLOAD_BASE__ === "string"
     ? __AGENTROOM_CLI_DOWNLOAD_BASE__
@@ -79,6 +82,10 @@ try {
     await configureExistingBridge(args);
   } else if (command === "start") {
     await startConfiguredSession(args);
+  } else if (command === "send") {
+    await sendRoomMessage(args);
+  } else if (command === "history") {
+    await printRoomHistory(args);
   } else if (command === "update") {
     await updateCli(args);
   } else if (command === "version" || command === "--version") {
@@ -106,6 +113,26 @@ async function joinRoom(args: string[], attach: boolean): Promise<void> {
     }
   };
   try {
+    const provider = parseProvider(
+      option(args, "--provider") ??
+        (await requiredPrompt(prompt, "Provider (claude/codex): ")),
+    );
+    const manualStart = args.includes("--manual-start");
+    let codexCommand =
+      option(args, "--codex-command") ??
+      process.env.AGENTROOM_CODEX_COMMAND ??
+      "codex";
+    let claudeCommand =
+      option(args, "--claude-command") ??
+      process.env.AGENTROOM_CLAUDE_COMMAND ??
+      "claude";
+    if (!manualStart && provider === "claude") {
+      claudeCommand = resolveProviderExecutable(claudeCommand, "Claude Code");
+    }
+    if (!manualStart && provider === "codex") {
+      codexCommand = resolveProviderExecutable(codexCommand, "Codex");
+    }
+
     const publicJoin = args.includes("--public");
     const inviteOption = option(args, "--invite");
     if (publicJoin && inviteOption) {
@@ -118,10 +145,6 @@ async function joinRoom(args: string[], attach: boolean): Promise<void> {
         : ((await prompt.question(
             "Room invite code (leave blank for a public room): ",
           )).trim() || undefined));
-    const provider = parseProvider(
-      option(args, "--provider") ??
-        (await requiredPrompt(prompt, "Provider (claude/codex): ")),
-    );
     const displayName =
       option(args, "--name") ??
       (await requiredPrompt(
@@ -134,26 +157,11 @@ async function joinRoom(args: string[], attach: boolean): Promise<void> {
     );
     const workspace = resolve(option(args, "--workspace") ?? process.cwd());
     const session = option(args, "--session") ?? "last";
-    const manualStart = args.includes("--manual-start");
     const noLaunch = args.includes("--no-launch") || !stdin.isTTY || !stdout.isTTY;
-    const codexCommand =
-      option(args, "--codex-command") ??
-      process.env.AGENTROOM_CODEX_COMMAND ??
-      "codex";
     const codexThreadId =
       attach && provider === "codex"
         ? await chooseCodexThread(args, prompt, workspace, session)
         : undefined;
-    const claudeCommand =
-      option(args, "--claude-command") ??
-      process.env.AGENTROOM_CLAUDE_COMMAND ??
-      "claude";
-    if (!manualStart && provider === "claude") {
-      requireExecutable(claudeCommand, "Claude Code");
-    }
-    if (!manualStart && provider === "codex") {
-      requireExecutable(codexCommand, "Codex");
-    }
     const response = await fetch(
       `${baseUrl}/v1/rooms/${encodeURIComponent(roomId)}/members`,
       {
@@ -314,6 +322,9 @@ async function runBridge(args: string[]): Promise<void> {
     process.env.AGENTROOM_ROOM_ID = config.roomId;
     process.env.AGENTROOM_ACCESS_TOKEN = accessToken;
     process.env.AGENTROOM_WORKSPACE = config.workspace;
+    process.env.AGENTROOM_RECEIVER_STATUS_FILE = receiverStatusPath(
+      resolve(configPath),
+    );
     if (config.memberId) {
       process.env.AGENTROOM_MEMBER_ID = config.memberId;
     } else {
@@ -355,6 +366,55 @@ async function runCodexMcp(args: string[]): Promise<void> {
   await import("./codex/mcp-receiver.js");
 }
 
+async function sendRoomMessage(args: string[]): Promise<void> {
+  const text = option(args, "--text");
+  if (!text?.trim()) {
+    throw new Error("--text is required and must be non-empty");
+  }
+  if (text.length > 8_000) {
+    throw new Error("--text must be at most 8000 characters");
+  }
+  const { client } = await configuredClient(args);
+  const message = await client.sendTextMessage(text);
+  console.log(JSON.stringify({ message }, null, 2));
+}
+
+async function printRoomHistory(args: string[]): Promise<void> {
+  const afterSequence = integerOption(args, "--after-sequence", 0, 0);
+  const limit = integerOption(args, "--limit", 50, 1, 200);
+  const { client } = await configuredClient(args);
+  const history = await client.listMessages(afterSequence, limit);
+  console.log(JSON.stringify(history, null, 2));
+}
+
+async function configuredClient(
+  args: string[],
+): Promise<{ client: AgentRoomClient; configPath: string }> {
+  const configPath = option(args, "--config") ?? positional(args, 0);
+  if (!configPath) {
+    throw new Error("--config is required");
+  }
+  const resolvedConfigPath = resolve(configPath);
+  const config = parseStoredConfig(
+    JSON.parse(await readFile(resolvedConfigPath, "utf8")) as unknown,
+  );
+  const accessToken =
+    config.credentialStore === "keychain"
+      ? await resolveKeychainToken(config)
+      : config.accessToken;
+  return {
+    configPath: resolvedConfigPath,
+    client: new AgentRoomClient({
+      baseUrl: config.baseUrl,
+      roomId: config.roomId,
+      accessToken,
+      httpTimeoutMs: 15_000,
+      socketConnectTimeoutMs: 15_000,
+      recoveryIntervalMs: 15_000,
+    }),
+  };
+}
+
 async function configureExistingBridge(args: string[]): Promise<void> {
   const configPath = option(args, "--config") ?? positional(args, 0);
   if (!configPath) {
@@ -368,11 +428,12 @@ async function configureExistingBridge(args: string[]): Promise<void> {
 
   if (config.provider === "codex") {
     config = await ensureCodexSessionConfig(resolvedConfigPath, config);
-    const codexCommand =
+    const codexCommand = resolveProviderExecutable(
       option(args, "--codex-command") ??
       process.env.AGENTROOM_CODEX_COMMAND ??
-      "codex";
-    requireExecutable(codexCommand, "Codex");
+      "codex",
+      "Codex",
+    );
     configureCodexMcp(codexCommand, localCli, config.workspace);
     console.log(`Configured Codex MCP receiver ${codexReceiverServerName}.`);
     console.log("Start the connected Codex CLI with:");
@@ -385,11 +446,12 @@ async function configureExistingBridge(args: string[]): Promise<void> {
       "The existing Claude config has no memberId; join the room again to create an MCP-managed config",
     );
   }
-  const claudeCommand =
+  const claudeCommand = resolveProviderExecutable(
     option(args, "--claude-command") ??
     process.env.AGENTROOM_CLAUDE_COMMAND ??
-    "claude";
-  requireExecutable(claudeCommand, "Claude Code");
+    "claude",
+    "Claude Code",
+  );
   const serverName = claudeServerName(config.roomId, config.memberId);
   configureClaudeMcp(
     claudeCommand,
@@ -425,11 +487,12 @@ async function startConfiguredSession(args: string[]): Promise<void> {
   };
 
   if (config.provider === "claude") {
-    const claudeCommand =
+    const claudeCommand = resolveProviderExecutable(
       option(args, "--claude-command") ??
       process.env.AGENTROOM_CLAUDE_COMMAND ??
-      "claude";
-    requireExecutable(claudeCommand, "Claude Code");
+      "claude",
+      "Claude Code",
+    );
     const serverName = claudeServerName(config.roomId, config.memberId);
     await launchOrPrint({
       command: claudeCommand,
@@ -448,11 +511,12 @@ async function startConfiguredSession(args: string[]): Promise<void> {
   if (!config.stateFile || !config.codexAppServerEndpoint) {
     throw new Error("Codex session config upgrade did not produce local session paths");
   }
-  const codexCommand =
+  const codexCommand = resolveProviderExecutable(
     option(args, "--codex-command") ??
     process.env.AGENTROOM_CODEX_COMMAND ??
-    "codex";
-  requireExecutable(codexCommand, "Codex");
+    "codex",
+    "Codex",
+  );
   configureCodexMcp(
     codexCommand,
     localCliInvocation(),
@@ -853,10 +917,12 @@ async function chooseCodexThread(
   workspace: string,
   defaultSelector: string,
 ): Promise<string> {
-  const codexCommand =
+  const codexCommand = resolveProviderExecutable(
     option(args, "--codex-command") ??
     process.env.AGENTROOM_CODEX_COMMAND ??
-    "codex";
+    "codex",
+    "Codex",
+  );
   const appServer = new CodexAppServerClient(codexCommand, workspace);
   try {
     await appServer.start();
@@ -886,16 +952,6 @@ async function chooseCodexThread(
     return await appServer.resumeThread(selected.id);
   } finally {
     appServer.close();
-  }
-}
-
-function requireExecutable(command: string, label: string): void {
-  const result = spawnSync(command, ["--version"], { stdio: "ignore" });
-  if (result.error) {
-    throw new Error(`${label} executable is unavailable: ${result.error.message}`);
-  }
-  if (result.status !== 0) {
-    throw new Error(`${label} executable exited with status ${result.status}`);
   }
 }
 
@@ -998,6 +1054,30 @@ function positional(args: string[], index: number): string | undefined {
   })[index];
 }
 
+function integerOption(
+  args: string[],
+  name: string,
+  fallback: number,
+  minimum: number,
+  maximum?: number,
+): number {
+  const raw = option(args, name);
+  if (raw === undefined) {
+    return fallback;
+  }
+  const value = Number(raw);
+  if (
+    !Number.isSafeInteger(value) ||
+    value < minimum ||
+    (maximum !== undefined && value > maximum)
+  ) {
+    throw new Error(
+      `${name} must be an integer between ${minimum} and ${maximum ?? "the safe integer limit"}`,
+    );
+  }
+  return value;
+}
+
 async function requiredPrompt(
   prompt: ReturnType<typeof createInterface>,
   message: string,
@@ -1050,6 +1130,8 @@ Usage:
                    [--credential-store file|keychain] [--no-launch]
                    [--manual-start]
   agentroom start --config PATH [--no-launch]
+  agentroom send --config PATH --text TEXT
+  agentroom history --config PATH [--after-sequence N] [--limit 1..200]
   agentroom run --config PATH
   agentroom mcp [--workspace PATH]
   agentroom configure --config PATH

@@ -5,6 +5,7 @@ import { CodexAppServerClient } from "./app-server-client.js";
 import { CodexTaskRunner } from "./runner.js";
 import { DeliveryWorker } from "../delivery-worker.js";
 import { SessionCardStore } from "../session-cards.js";
+import { ReceiverStatusReporter } from "../receiver-status.js";
 
 const config = loadCodexBridgeConfig();
 const client = new AgentRoomClient(config);
@@ -23,6 +24,12 @@ const sessionCards = new SessionCardStore(
 );
 const worker = new DeliveryWorker(client, runner, sessionCards);
 const abortController = new AbortController();
+const statusReporter = config.receiverStatusFile
+  ? new ReceiverStatusReporter(config.receiverStatusFile, {
+      roomId: config.roomId,
+      ...(config.memberId ? { memberId: config.memberId } : {}),
+    })
+  : undefined;
 
 function shutdown(): void {
   abortController.abort();
@@ -58,6 +65,7 @@ const recoveryTimer = setInterval(() => {
 }, config.recoveryIntervalMs);
 
 try {
+  await statusReporter?.report("starting");
   await client.listen(
     (event) => {
       if (event.type === "delivery.queued") {
@@ -66,9 +74,11 @@ try {
     },
     abortController.signal,
     recoverPending,
+    (update) => statusReporter?.report(update.state, update.error),
   );
 } finally {
   clearInterval(recoveryTimer);
+  await statusReporter?.report("stopped");
   appServer.close();
   await worker.idle();
 }

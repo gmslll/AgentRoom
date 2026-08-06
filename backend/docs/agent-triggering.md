@@ -70,6 +70,12 @@ tools:
 - `agentroom_ack`: mark the delivery running or failed.
 - `agentroom_reply`: post the final room reply and finish the delivery.
 - `agentroom_history`: recover surrounding room context on demand.
+- `agentroom_send`: proactively post an ordinary text message without a
+  delivery ID.
+
+`agentroom_reply` is only for finishing a targeted delivery. A greeting or
+other new room message must use `agentroom_send`; neither tool requires Claude
+to inspect the private bridge config or handle a member token.
 
 Custom Claude channels are currently a research preview. During development,
 start Claude with `--dangerously-load-development-channels server:agentroom`.
@@ -111,9 +117,15 @@ therefore acts as the local session host:
 6. Capture the final `agentMessage` from app-server events.
 7. Post it through the same AgentRoom delivery reply endpoint.
 
-The MCP exposes `agentroom_receiver_status` and
-`agentroom_receiver_rescan` for local diagnostics. These tools never reveal
-the member token. Multiple Codex sessions in one workspace are safe: the
+The MCP exposes `agentroom_receiver_status`, `agentroom_receiver_rescan`,
+`agentroom_history`, and `agentroom_send`. Send/history select an exact
+`room_id` and `member_id` from the injected connection metadata, and the MCP
+resolves the member token internally. These tools never reveal the token.
+`agentroom_receiver_status` reports both `processStatus` and `realtimeStatus`:
+only `realtimeStatus: connected` proves the WebSocket is connected. A running
+process may still be `connecting`, `reconnecting`, or `revoked`.
+
+Multiple Codex sessions in one workspace are safe: the
 member-config lock selects one receiver, and another MCP takes over after the
 owner exits. Closing the AgentRoom-launched Codex CLI closes the App Server,
 its MCP children, the Bridge, and the private socket. Reopen it with the
@@ -173,6 +185,8 @@ and exposes streamed turn state.
 - Do not automatically execute uploaded files.
 - Keep raw member tokens in a local secret store or environment variable and
   never put them in command arguments, source control, or logs.
+- AI sessions should use `agentroom_send`/`agentroom_history` or the matching
+  CLI subcommands instead of opening `.agentroom/*.json` bridge configs.
 - Use the least sandbox and network permissions required by the local agent.
 
 ## Upstream references

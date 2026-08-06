@@ -6,6 +6,10 @@ import {
   CodexMcpSupervisor,
   discoverCodexBridgeConfigs,
 } from "../../src/connectors/codex/mcp-supervisor.js";
+import {
+  ReceiverStatusReporter,
+  receiverStatusPath,
+} from "../../src/connectors/receiver-status.js";
 
 describe("Codex MCP workspace discovery", () => {
   it("loads only Codex bridge configs for the exact workspace", async () => {
@@ -116,25 +120,43 @@ describe("Codex MCP workspace discovery", () => {
 
     try {
       await supervisor.start();
-      await waitFor(() => supervisor.statuses()[0]?.status === "running");
-      expect(supervisor.statuses()).toEqual([
+      await waitFor(async () => (await supervisor.statuses())[0]?.status === "running");
+      const running = await supervisor.statuses();
+      expect(running).toEqual([
         expect.objectContaining({
           roomId: "room_codex",
           memberId: "mem_codex",
           status: "running",
+          processStatus: "running",
+          realtimeStatus: "unknown",
           pid: expect.any(Number),
+        }),
+      ]);
+      const configPath = join(privateDirectory, "codex-room.json");
+      await new ReceiverStatusReporter(
+        receiverStatusPath(configPath),
+        { roomId: "room_codex", memberId: "mem_codex" },
+        running[0]!.pid,
+      ).report("connected");
+      expect(await supervisor.statuses()).toEqual([
+        expect.objectContaining({
+          processStatus: "running",
+          realtimeStatus: "connected",
+          lastConnectedAt: expect.any(String),
         }),
       ]);
     } finally {
       await supervisor.close();
     }
-    expect(supervisor.statuses()).toEqual([]);
+    expect(await supervisor.statuses()).toEqual([]);
   });
 });
 
-async function waitFor(predicate: () => boolean): Promise<void> {
+async function waitFor(
+  predicate: () => boolean | Promise<boolean>,
+): Promise<void> {
   const deadline = Date.now() + 2_000;
-  while (!predicate()) {
+  while (!(await predicate())) {
     if (Date.now() >= deadline) {
       throw new Error("Timed out waiting for the receiver child");
     }

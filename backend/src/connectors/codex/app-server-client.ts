@@ -102,7 +102,7 @@ export class CodexAppServerClient {
         clientInfo: {
           name: "agentroom_bridge",
           title: "AgentRoom Bridge",
-          version: "0.4.0",
+          version: "0.4.1",
         },
       });
       this.notify("initialized", {});

@@ -182,6 +182,16 @@ Both installers verify the bundle SHA-256 from the generated release before
 installing it into a user-local binary directory. Windows adds that directory
 to the user PATH for new terminals; macOS/Linux prints the required PATH
 command when needed.
+
+AgentRoom installs only its own bridge; Claude Code and Codex must already be
+installed. On native Windows, verify Claude with `where.exe claude` and
+`claude --version`. The recommended native Claude installer places
+`claude.exe` under `%USERPROFILE%\.local\bin`; AgentRoom also checks that path
+when the current terminal has not refreshed PATH yet. If Claude is absent,
+install it from PowerShell with `irm https://claude.ai/install.ps1 | iex` (or
+use `winget install Anthropic.ClaudeCode`), then open a new terminal. A join
+failure at this preflight stage does not create a room member.
+
 The stable `agentroom.mjs` path is shared by Claude and Codex processes running
 as the same OS user, so it is installed only once. Upgrade it in place with:
 
@@ -247,6 +257,19 @@ the printed fallback command or start a saved bridge directly:
 ```bash
 node dist/connectors/cli.js run --config /absolute/path/to/private-config.json
 ```
+
+Ordinary room chat can be read or sent through the CLI without printing or
+manually extracting the private member token:
+
+```bash
+agentroom history --config "/absolute/path/to/private-config.json" --limit 50
+agentroom send --config "/absolute/path/to/private-config.json" --text "Hello from Codex"
+```
+
+Keep `--config` and its full path on one shell line. These commands create
+normal `text` messages; they do not trigger an AI turn. Claude and Codex expose
+the same operations as `agentroom_history` and `agentroom_send` MCP tools, so an
+AI should use the tool instead of reading `.agentroom/*.json` itself.
 
 An existing config created by an older CLI can be migrated without joining the
 room again:
@@ -316,7 +339,18 @@ agentroom mcp
 
 Codex launches it as a stdio server in the current project. The MCP discovers
 Codex bridge configs for that exact workspace, supervises one locked receiver
-per config, and exposes `agentroom_receiver_status` for diagnostics. In the
+per config, and exposes `agentroom_receiver_status`, `agentroom_history`, and
+`agentroom_send`. History and send require the exact `room_id` plus `member_id`
+shown in the session connection metadata, preventing a multi-room workspace
+from sending under the wrong identity. The MCP resolves the private credential
+internally and never returns it.
+
+Receiver diagnostics intentionally separate process and network state:
+`processStatus: running` means only that the receiver process is alive;
+`realtimeStatus: connected` is the authoritative successful WebSocket state.
+`connecting`, `reconnecting`, `revoked`, and `stopped` expose the actual
+connection lifecycle, with a token-free status sidecar used across Codex MCP
+processes. In the
 normal interactive flow, AgentRoom owns a session-scoped local
 `codex app-server` endpoint; both the receiver and the visible `codex --remote`
 TUI subscribe to the same persisted thread. Each receiver preserves its member-scoped thread

@@ -3,9 +3,17 @@ import { readdir, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import {
   parseStoredConfig,
+  resolveKeychainToken,
   type StoredBridgeConfig,
 } from "../bridge-config.js";
+import { AgentRoomClient } from "../agentroom-client.js";
 import type { CommandInvocation } from "../session-attach.js";
+import {
+  readReceiverRuntimeStatus,
+  receiverStatusPath,
+  type ReceiverRealtimeStatus,
+} from "../receiver-status.js";
+import type { RoomMessage } from "../../protocol/rooms.js";
 
 export type ReceiverStatus =
   | "starting"
@@ -19,8 +27,13 @@ export interface CodexReceiverStatus {
   memberId?: string;
   workspace: string;
   status: ReceiverStatus;
+  processStatus: ReceiverStatus;
+  realtimeStatus: ReceiverRealtimeStatus | "unknown";
   pid?: number;
   error?: string;
+  connectionError?: string;
+  lastConnectedAt?: string;
+  statusUpdatedAt?: string;
 }
 
 interface ManagedReceiver {
@@ -93,20 +106,69 @@ export class CodexMcpSupervisor {
     return this.#scanning;
   }
 
-  statuses(): CodexReceiverStatus[] {
-    return [...this.#receivers.values()]
-      .map((receiver) => ({
-        configPath: receiver.configPath,
-        roomId: receiver.config.roomId,
-        ...(receiver.config.memberId
-          ? { memberId: receiver.config.memberId }
-          : {}),
-        workspace: receiver.config.workspace,
-        status: receiver.status,
-        ...(receiver.pid ? { pid: receiver.pid } : {}),
-        ...(receiver.error ? { error: receiver.error } : {}),
-      }))
-      .sort((left, right) => left.configPath.localeCompare(right.configPath));
+  async statuses(): Promise<CodexReceiverStatus[]> {
+    const statuses = await Promise.all(
+      [...this.#receivers.values()].map(async (receiver) => {
+        const runtime = await readReceiverRuntimeStatus(
+          receiverStatusPath(receiver.configPath),
+        );
+        const currentRuntime =
+          runtime &&
+          receiver.pid === runtime.pid &&
+          receiver.config.roomId === runtime.roomId &&
+          (!receiver.config.memberId ||
+            receiver.config.memberId === runtime.memberId)
+            ? runtime
+            : undefined;
+        const realtimeStatus: CodexReceiverStatus["realtimeStatus"] =
+          currentRuntime?.state ?? "unknown";
+        const status: CodexReceiverStatus = {
+          configPath: receiver.configPath,
+          roomId: receiver.config.roomId,
+          ...(receiver.config.memberId
+            ? { memberId: receiver.config.memberId }
+            : {}),
+          workspace: receiver.config.workspace,
+          status: receiver.status,
+          processStatus: receiver.status,
+          realtimeStatus,
+          ...(receiver.pid ? { pid: receiver.pid } : {}),
+          ...(receiver.error ? { error: receiver.error } : {}),
+          ...(currentRuntime?.lastError
+            ? { connectionError: currentRuntime.lastError }
+            : {}),
+          ...(currentRuntime?.lastConnectedAt
+            ? { lastConnectedAt: currentRuntime.lastConnectedAt }
+            : {}),
+          ...(currentRuntime?.updatedAt
+            ? { statusUpdatedAt: currentRuntime.updatedAt }
+            : {}),
+        };
+        return status;
+      }),
+    );
+    return statuses.sort((left, right) =>
+      left.configPath.localeCompare(right.configPath),
+    );
+  }
+
+  async listMessages(input: {
+    roomId: string;
+    memberId: string;
+    afterSequence: number;
+    limit: number;
+  }): Promise<{ items: RoomMessage[]; nextAfterSequence: number }> {
+    const client = await this.#clientFor(input.roomId, input.memberId);
+    return client.listMessages(input.afterSequence, input.limit);
+  }
+
+  async sendTextMessage(input: {
+    roomId: string;
+    memberId: string;
+    text: string;
+  }): Promise<RoomMessage> {
+    const client = await this.#clientFor(input.roomId, input.memberId);
+    return client.sendTextMessage(input.text);
   }
 
   async close(): Promise<void> {
@@ -181,6 +243,41 @@ export class CodexMcpSupervisor {
 
       this.#launch(discoveredConfig);
     }
+  }
+
+  async #clientFor(
+    roomId: string,
+    memberId: string,
+  ): Promise<AgentRoomClient> {
+    await this.scan();
+    const matches = [...this.#receivers.values()].filter(
+      (receiver) =>
+        receiver.config.roomId === roomId &&
+        receiver.config.memberId === memberId,
+    );
+    if (matches.length === 0) {
+      throw new Error(
+        `No AgentRoom Codex receiver matches room ${roomId} and member ${memberId}`,
+      );
+    }
+    if (matches.length > 1) {
+      throw new Error(
+        `Multiple AgentRoom Codex receivers match room ${roomId} and member ${memberId}`,
+      );
+    }
+    const config = matches[0]!.config;
+    const accessToken =
+      config.credentialStore === "keychain"
+        ? await resolveKeychainToken(config)
+        : config.accessToken;
+    return new AgentRoomClient({
+      baseUrl: config.baseUrl,
+      roomId: config.roomId,
+      accessToken,
+      httpTimeoutMs: 15_000,
+      socketConnectTimeoutMs: 15_000,
+      recoveryIntervalMs: 15_000,
+    });
   }
 
   #launch(discovered: DiscoveredCodexBridgeConfig): void {

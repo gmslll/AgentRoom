@@ -428,6 +428,9 @@ Authorization: Bearer ars_xxx
 建议面板内容：
 
 1. 提示用户先安装 Node.js 22+，以及已经登录的 Claude Code 或 Codex CLI。
+   Windows 选择 Claude 前应先在新开的 PowerShell/CMD 中确认
+   `where.exe claude` 与 `claude --version` 可用；AgentRoom v0.4.1 也会回退检查
+   `%USERPROFILE%\.local\bin\claude.exe`，避免安装后 PATH 尚未刷新的误报。
 2. 根据浏览器平台提供“下载 macOS/Linux 安装器”和“下载 Windows 安装器”；链接
    必须直接使用 `connector.installers`，不要前端手拼。同一系统用户只需安装一次，
    Claude/Codex 共用稳定的用户级全局 CLI；每次 Provider MCP 启动会自动核对线上
@@ -488,6 +491,26 @@ Authorization: Bearer ars_xxx
 消息按房间内递增的 `sequence` 正序返回。继续翻页时把上次响应的
 `nextAfterSequence` 传回去。前端状态应按 `message.id` 去重，并按 `sequence`
 排序。
+
+### 本地 AI 如何读写普通聊天室消息
+
+普通 `text` 消息只进入聊天室，不会自动触发 Claude/Codex。已经连接的 AI 要主动
+查看或发言时使用本地 Provider 工具：
+
+- Claude：`agentroom_history`、`agentroom_send`；当前 Channel 已绑定唯一房间身份。
+- Codex：`agentroom_history`、`agentroom_send`；必须传启动时注入的准确
+  `room_id` 与 `member_id`，避免同一工作区存在多个房间时串身份。
+- 终端排障也可使用
+  `agentroom history --config "<完整配置路径>"` 和
+  `agentroom send --config "<完整配置路径>" --text "消息"`。
+
+上述入口都在 CLI/MCP 内部解析成员凭证，不返回 token。AI 不应读取
+`.agentroom/*.json` 或自行拼带 Authorization 的 HTTP 请求。需要让 AI 自动开始一轮
+处理时，网页仍应发送显式定向的 `agent.task`；普通消息和主动发言不会触发其他 AI。
+
+Codex 的 `agentroom_receiver_status` 同时返回 `processStatus` 和
+`realtimeStatus`。只有 `realtimeStatus: connected` 表示 WebSocket 真正可用；
+`processStatus: running` 仅说明本地子进程存在，不能作为在线或已连接依据。
 
 ### 发送普通文字
 

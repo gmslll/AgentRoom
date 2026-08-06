@@ -14,6 +14,18 @@ interface ApiErrorBody {
   };
 }
 
+export type AgentRoomConnectionState =
+  | "connecting"
+  | "connected"
+  | "reconnecting"
+  | "revoked"
+  | "stopped";
+
+export interface AgentRoomConnectionUpdate {
+  state: AgentRoomConnectionState;
+  error?: unknown;
+}
+
 class AgentRoomApiError extends Error {
   constructor(
     readonly status: number,
@@ -48,6 +60,17 @@ export class AgentRoomClient {
     );
   }
 
+  async sendTextMessage(text: string): Promise<RoomMessage> {
+    const body = await this.request<{ message: RoomMessage }>(
+      `/v1/rooms/${encodeURIComponent(this.config.roomId)}/messages`,
+      {
+        method: "POST",
+        body: JSON.stringify({ kind: "text", text }),
+      },
+    );
+    return body.message;
+  }
+
   async updateDelivery(
     deliveryId: string,
     status: "received" | "running" | "failed",
@@ -79,24 +102,50 @@ export class AgentRoomClient {
     onEvent: (event: RealtimeServerEvent) => void | Promise<void>,
     signal?: AbortSignal,
     onConnected?: () => void | Promise<void>,
+    onConnectionUpdate?: (
+      update: AgentRoomConnectionUpdate,
+    ) => void | Promise<void>,
   ): Promise<void> {
     let retryMs = 500;
+    let firstAttempt = true;
 
     while (!signal?.aborted) {
+      await emitConnectionUpdate(onConnectionUpdate, {
+        state: firstAttempt ? "connecting" : "reconnecting",
+      });
+      firstAttempt = false;
       try {
-        await this.openSocket(onEvent, signal, onConnected);
+        await this.openSocket(onEvent, signal, async () => {
+          await emitConnectionUpdate(onConnectionUpdate, {
+            state: "connected",
+          });
+          await onConnected?.();
+        });
         retryMs = 500;
+        if (!signal?.aborted) {
+          await emitConnectionUpdate(onConnectionUpdate, {
+            state: "reconnecting",
+          });
+        }
       } catch (error) {
         if (!signal?.aborted) {
           console.error("AgentRoom realtime connection failed:", error);
         }
         if (isTerminalMembershipError(error)) {
+          await emitConnectionUpdate(onConnectionUpdate, {
+            state: "revoked",
+            error,
+          });
           console.error(
             "AgentRoom membership is no longer active; receiver will stay stopped until the provider exits.",
           );
           await waitForAbort(signal);
-          return;
+          break;
         }
+        await emitConnectionUpdate(onConnectionUpdate, {
+          state: "reconnecting",
+          error,
+        });
       }
 
       if (signal?.aborted) {
@@ -105,6 +154,7 @@ export class AgentRoomClient {
       await abortableDelay(retryMs, signal);
       retryMs = Math.min(retryMs * 2, 15_000);
     }
+    await emitConnectionUpdate(onConnectionUpdate, { state: "stopped" });
   }
 
   private async openSocket(
@@ -229,6 +279,17 @@ async function waitForAbort(signal?: AbortSignal): Promise<void> {
   await new Promise<void>((resolvePromise) => {
     signal?.addEventListener("abort", () => resolvePromise(), { once: true });
   });
+}
+
+async function emitConnectionUpdate(
+  listener: ((update: AgentRoomConnectionUpdate) => void | Promise<void>) | undefined,
+  update: AgentRoomConnectionUpdate,
+): Promise<void> {
+  try {
+    await listener?.(update);
+  } catch (error) {
+    console.error("Could not record AgentRoom receiver status:", error);
+  }
 }
 
 export function agentRoomRequestHeaders(

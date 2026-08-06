@@ -220,6 +220,7 @@ install -m 0755 "\$TMP_DIR/agentroom" "\$BIN_DIR/agentroom"
 
 echo "AgentRoom CLI installed to \$BIN_DIR/agentroom"
 echo "Claude and Codex running as this OS user share this installation."
+echo "Before joining, verify the selected provider CLI: claude --version or codex --version"
 echo "Update it later with: agentroom update"
 case ":\$PATH:" in
   *":\$BIN_DIR:"*) ;;
@@ -278,6 +279,7 @@ $env:Path = "$BinDir;$env:Path"
 & (Join-Path $BinDir "agentroom.cmd") --help | Out-Null
 Write-Host "AgentRoom CLI installed to $BinDir\\agentroom.cmd"
 Write-Host "Claude and Codex running as this Windows user share this installation."
+Write-Host "Before selecting Claude, verify: where.exe claude; claude --version"
 Write-Host "Update it later with: agentroom update"
 Write-Host "Open a new terminal, then run: agentroom --help"
 `;

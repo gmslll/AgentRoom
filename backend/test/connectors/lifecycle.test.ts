@@ -50,6 +50,56 @@ describe("bridge lifecycle", () => {
     ).toBe("ws://127.0.0.1:8787/v1/realtime?ticket=ticket_1");
   });
 
+  it("posts ordinary room text without exposing the member token", async () => {
+    const message = {
+      id: "msg_1",
+      roomId: "room_12345678",
+      sequence: 1,
+      kind: "text" as const,
+      text: "你好，AgentRoom！",
+      attachmentIds: [],
+      targetMemberIds: [],
+      inReplyToMessageId: null,
+      idempotencyKey: null,
+      author: {
+        memberId: "mem_1",
+        displayName: "Codex",
+        actorType: "agent" as const,
+        agentProvider: "codex" as const,
+      },
+      createdAt: "2026-08-06T00:00:00.000Z",
+    };
+    const fetchMock = vi.fn(
+      async (_input: string | URL | Request, _init?: RequestInit) =>
+        new Response(JSON.stringify({ message }), {
+          status: 201,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new AgentRoomClient({
+      baseUrl: "https://try-status.online/api",
+      roomId: "room_12345678",
+      accessToken: "art_secret",
+      httpTimeoutMs: 100,
+      socketConnectTimeoutMs: 100,
+      recoveryIntervalMs: 100,
+    });
+
+    await expect(client.sendTextMessage(message.text)).resolves.toEqual(message);
+    const [url, request] = fetchMock.mock.calls[0]!;
+    expect(url).toBe(
+      "https://try-status.online/api/v1/rooms/room_12345678/messages",
+    );
+    expect(request).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({ kind: "text", text: message.text }),
+    });
+    expect(new Headers(request?.headers).get("authorization")).toBe(
+      "Bearer art_secret",
+    );
+  });
+
   it("treats an aborted realtime listener as a clean shutdown", async () => {
     const controller = new AbortController();
     controller.abort();
@@ -93,14 +143,24 @@ describe("bridge lifecycle", () => {
       socketConnectTimeoutMs: 100,
       recoveryIntervalMs: 100,
     });
+    const states: string[] = [];
 
-    const listening = client.listen(() => undefined, controller.signal);
+    const listening = client.listen(
+      () => undefined,
+      controller.signal,
+      undefined,
+      (update) => {
+        states.push(update.state);
+      },
+    );
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(states).toContain("revoked"));
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     controller.abort();
     await expect(listening).resolves.toBe(undefined);
+    expect(states).toEqual(["connecting", "revoked", "stopped"]);
   });
 
   it("rejects a missing Codex executable without crashing the process", async () => {

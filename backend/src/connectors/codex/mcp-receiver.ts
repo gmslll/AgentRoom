@@ -17,13 +17,15 @@ const supervisor = new CodexMcpSupervisor({
   cli: localCliInvocation(),
 });
 const mcp = new Server(
-  { name: "agentroom-receiver", version: "0.4.0" },
+  { name: "agentroom-receiver", version: "0.4.1" },
   {
     capabilities: { tools: {} },
     instructions:
       "This MCP automatically starts AgentRoom Codex receivers configured under the current workspace's private .agentroom directory. " +
       "When the session was started through AgentRoom, targeted room tasks execute in the same Remote TUI thread and appear in the visible Codex CLI. " +
-      "Use agentroom_receiver_status to diagnose room connectivity. Normal room chat messages never start an agent task.",
+      "Use agentroom_receiver_status to diagnose room connectivity; realtimeStatus=connected is authoritative, while processStatus only describes the local process. " +
+      "Use agentroom_history to read ordinary room chat and agentroom_send to proactively post an ordinary text message. " +
+      "Normal room chat messages never start an agent task. Never read private .agentroom bridge configs or expose member tokens.",
   },
 );
 
@@ -49,31 +51,70 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
         properties: {},
       },
     },
+    {
+      name: "agentroom_history",
+      description:
+        "Read messages from one configured AgentRoom membership without exposing its token",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          room_id: { type: "string", minLength: 1 },
+          member_id: { type: "string", minLength: 1 },
+          after_sequence: { type: "integer", minimum: 0 },
+          limit: { type: "integer", minimum: 1, maximum: 200 },
+        },
+        required: ["room_id", "member_id"],
+      },
+    },
+    {
+      name: "agentroom_send",
+      description:
+        "Post an ordinary text message as one configured AgentRoom membership without exposing its token",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          room_id: { type: "string", minLength: 1 },
+          member_id: { type: "string", minLength: 1 },
+          text: { type: "string", minLength: 1, maxLength: 8_000 },
+        },
+        required: ["room_id", "member_id", "text"],
+      },
+    },
   ],
 }));
 
 mcp.setRequestHandler(CallToolRequestSchema, async (request) => {
+  const args = asObject(request.params.arguments);
+  if (request.params.name === "agentroom_history") {
+    const history = await supervisor.listMessages({
+      roomId: requiredString(args, "room_id"),
+      memberId: requiredString(args, "member_id"),
+      afterSequence: boundedInteger(args, "after_sequence", 0, 0, undefined),
+      limit: boundedInteger(args, "limit", 50, 1, 200),
+    });
+    return toolJson(history);
+  }
+  if (request.params.name === "agentroom_send") {
+    const text = requiredString(args, "text");
+    if (text.length > 8_000) {
+      throw new Error("text must be at most 8000 characters");
+    }
+    const message = await supervisor.sendTextMessage({
+      roomId: requiredString(args, "room_id"),
+      memberId: requiredString(args, "member_id"),
+      text,
+    });
+    return toolJson({ message });
+  }
   if (request.params.name === "agentroom_receiver_rescan") {
     await supervisor.scan();
   } else if (request.params.name !== "agentroom_receiver_status") {
     throw new Error(`Unknown tool: ${request.params.name}`);
   }
 
-  return {
-    content: [
-      {
-        type: "text" as const,
-        text: JSON.stringify(
-          {
-            workspace,
-            receivers: supervisor.statuses(),
-          },
-          null,
-          2,
-        ),
-      },
-    ],
-  };
+  return toolJson({ workspace, receivers: await supervisor.statuses() });
 });
 
 let closing: Promise<void> | undefined;
@@ -101,3 +142,46 @@ process.once("SIGTERM", shutdown);
 
 await mcp.connect(new StdioServerTransport());
 await supervisor.start();
+
+function asObject(value: unknown): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return {};
+  }
+  return value as Record<string, unknown>;
+}
+
+function requiredString(args: Record<string, unknown>, key: string): string {
+  const value = args[key];
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(`${key} must be a non-empty string`);
+  }
+  return value;
+}
+
+function boundedInteger(
+  args: Record<string, unknown>,
+  key: string,
+  fallback: number,
+  minimum: number,
+  maximum: number | undefined,
+): number {
+  const value = args[key] ?? fallback;
+  if (
+    !Number.isSafeInteger(value) ||
+    (value as number) < minimum ||
+    (maximum !== undefined && (value as number) > maximum)
+  ) {
+    throw new Error(
+      `${key} must be an integer between ${minimum} and ${maximum ?? "the safe integer limit"}`,
+    );
+  }
+  return value as number;
+}
+
+function toolJson(value: unknown) {
+  return {
+    content: [
+      { type: "text" as const, text: JSON.stringify(value, null, 2) },
+    ],
+  };
+}
