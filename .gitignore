@@ -5,6 +5,10 @@
 !.env.*.example
 CLAUDE.local.md
 
+# Agent tooling runtime data
+.reasonix/
+reasonix.toml
+
 # JavaScript / TypeScript
 node_modules/
 .next/

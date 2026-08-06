@@ -1,0 +1,59 @@
+import type { Ref } from "react";
+import { useShallow } from "zustand/react/shallow";
+import type { Message } from "../api/types";
+import { useMessageStore } from "../stores/messageStore";
+import { MessageBubble } from "./MessageBubble";
+
+interface MessageListProps {
+  roomId: string;
+  hasOlder: boolean;
+  loadingOlder: boolean;
+  onLoadOlder: () => void;
+  /** Scroll container ref for auto-scroll control. */
+  scrollRef?: Ref<HTMLDivElement>;
+}
+
+/** Scrollable message stream with "load older" at the top. */
+export function MessageList({
+  roomId,
+  hasOlder,
+  loadingOlder,
+  onLoadOlder,
+  scrollRef,
+}: MessageListProps) {
+  const messages = useMessageStore(
+    useShallow((state) =>
+      Object.values(state.byId)
+        .filter((m) => m.roomId === roomId)
+        .sort((a, b) => a.sequence - b.sequence),
+    ),
+  );
+
+  return (
+    <div ref={scrollRef} className="h-full overflow-y-auto">
+      <div className="py-3">
+        {hasOlder && (
+          <div className="flex justify-center pb-2">
+            <button
+              type="button"
+              onClick={onLoadOlder}
+              disabled={loadingOlder}
+              className="rounded-md border border-border px-3 py-1 text-xs text-muted transition-colors hover:border-border-strong hover:text-text disabled:opacity-50"
+            >
+              {loadingOlder ? "加载中…" : "加载更早的消息"}
+            </button>
+          </div>
+        )}
+        {messages.length === 0 ? (
+          <p className="px-4 py-8 text-center text-sm text-muted">
+            还没有消息。发送一条消息,或从右侧面板接入你的本地 Agent。
+          </p>
+        ) : (
+          messages.map((message: Message) => (
+            <MessageBubble key={message.id} message={message} />
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
