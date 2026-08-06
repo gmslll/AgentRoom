@@ -2,6 +2,7 @@ import {
   CreateBucketCommand,
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadBucketCommand,
   HeadObjectCommand,
   PutObjectCommand,
   S3Client,
@@ -45,14 +46,18 @@ export function createObjectStorage(options: {
   bucket: string | undefined;
   forcePathStyle: boolean;
 }): ObjectStorage {
+  if (!options.enabled) {
+    return new MemoryObjectStorage();
+  }
   if (
-    !options.enabled ||
     !options.endpoint ||
     !options.accessKeyId ||
     !options.secretAccessKey ||
     !options.bucket
   ) {
-    return new MemoryObjectStorage();
+    throw new Error(
+      "FILES_ENABLED requires S3_ENDPOINT, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, and S3_BUCKET",
+    );
   }
   return new S3ObjectStorage({
     endpoint: options.endpoint,
@@ -164,6 +169,7 @@ class S3ObjectStorage implements ObjectStorage {
 
   async healthCheck(): Promise<void> {
     await this.#client.config.credentials();
+    await this.#client.send(new HeadBucketCommand({ Bucket: this.#bucket }));
   }
 }
 

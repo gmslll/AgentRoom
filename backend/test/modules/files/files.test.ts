@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
 import { AppError } from "../../../src/lib/errors.js";
-import { MemoryObjectStorage } from "../../../src/lib/object-storage.js";
+import {
+  createObjectStorage,
+  MemoryObjectStorage,
+} from "../../../src/lib/object-storage.js";
 import { InMemoryFileRepository } from "../../../src/modules/files/memory-repository.js";
 import { FileService } from "../../../src/modules/files/service.js";
 import type { RoomMember } from "../../../src/modules/rooms/types.js";
@@ -40,6 +43,20 @@ function makeService(overrides: Partial<ConstructorParameters<typeof FileService
 }
 
 describe("FileService", () => {
+  it("fails closed when files are enabled without complete S3 configuration", () => {
+    expect(() =>
+      createObjectStorage({
+        enabled: true,
+        endpoint: undefined,
+        region: "us-east-1",
+        accessKeyId: undefined,
+        secretAccessKey: undefined,
+        bucket: undefined,
+        forcePathStyle: true,
+      }),
+    ).toThrow("FILES_ENABLED requires");
+  });
+
   it("creates an upload intent and completes it when the object matches", async () => {
     const { repository, storage, service } = makeService();
     const bytes = Buffer.from("hello world\n", "utf8");

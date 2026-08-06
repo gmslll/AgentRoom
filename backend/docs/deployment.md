@@ -1,18 +1,20 @@
 # Production deployment
 
 The current single-host deployment serves the Vite frontend from Nginx, runs
-the Node.js API under systemd, keeps PostgreSQL in a dedicated Docker container
-with a named volume, and terminates TLS/WebSockets in Nginx.
+the Node.js API under systemd, keeps PostgreSQL and MinIO in dedicated Docker
+containers with named volumes, and terminates TLS/WebSockets in Nginx.
 
 ## Topology
 
 ```text
 Internet -> Nginx :443 /        -> current/frontend/dist
                       /api/*   -> AgentRoom :18787 -> PostgreSQL :15432
-                                   systemd       Docker + named volume
+                      /agentroom-files/* -> MinIO :19000
+                                   systemd       Docker + named volumes
 ```
 
-Only Nginx is public. Bind both the API and database to loopback. Configure:
+Only Nginx is public. Bind the API, database, and MinIO ports to loopback.
+Configure:
 
 ```dotenv
 HOST=127.0.0.1
@@ -22,11 +24,36 @@ CORS_ORIGIN=https://try-status.online
 PUBLIC_BASE_URL=https://try-status.online/api
 DATABASE_URL=postgresql://agentroom:replace_me@127.0.0.1:15432/agentroom
 AUTH_SESSION_TTL_DAYS=30
+FILES_ENABLED=true
+FILES_MAX_SIZE_BYTES=104857600
+FILES_ROOM_QUOTA_BYTES=1073741824
+FILES_SCAN_RESULT=clean
+FILES_UPLOAD_URL_TTL_SECONDS=300
+S3_ENDPOINT=https://try-status.online
+S3_REGION=us-east-1
+S3_ACCESS_KEY_ID=agentroom
+S3_SECRET_ACCESS_KEY=replace_with_a_random_secret
+S3_BUCKET=agentroom-files
+S3_FORCE_PATH_STYLE=true
 ```
 
 Store the real file at `/etc/agentroom/backend.env`, owned by root with mode
 `0600`. Store PostgreSQL initialization variables in a separate root-only env
 file. Do not commit either file.
+
+Run MinIO as `agentroom-minio`, bind its API only to
+`127.0.0.1:19000:9000`, and persist `/data` in the named volume
+`agentroom-minio-data`. Put `MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD` in a
+separate root-owned mode-`0600` env file; they must match the S3 credentials
+above. Use a pinned MinIO image digest and `--restart unless-stopped`. Nginx
+publishes only the private `agentroom-files` bucket path over the existing TLS
+origin. Presigned requests preserve the public host and full bucket path; all
+unsigned object requests remain denied by MinIO.
+
+When `FILES_ENABLED=true`, application startup creates the bucket if needed
+and fails closed if any S3 setting is missing or the storage service is
+unreachable. This prevents a production deployment from silently returning
+unusable `memory://` upload URLs.
 
 The systemd unit runs compiled migrations before every application start.
 Migrations are checksum-verified, transactional, and protected by a PostgreSQL
@@ -94,6 +121,8 @@ It validates with `nginx -t` before switching, reloads rather than restarts
 Nginx, and restores the previous file on failure. `/api/` remains the backend
 proxy; `/` serves `current/frontend/dist`, immutable Vite assets receive a
 long-lived cache policy, and React Router deep links fall back to `index.html`.
+`/agentroom-files/` is reserved for presigned MinIO PUT/GET requests, permits
+up to 100MB bodies, disables proxy buffering, and is never handled by the SPA.
 
 ## Automatic deployment from a release tag
 

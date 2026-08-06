@@ -96,6 +96,9 @@ export async function buildApp(
     bucket: options.s3?.bucket,
     forcePathStyle: options.s3?.forcePathStyle ?? false,
   });
+  if (options.files?.enabled) {
+    await storage.ensureBucket();
+  }
   const mailer = createMailer({
     driver: options.mail?.driver ?? "log",
     from: options.mail?.from ?? "AgentRoom <no-reply@agentroom.local>",

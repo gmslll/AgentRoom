@@ -17,7 +17,7 @@ const supervisor = new CodexMcpSupervisor({
   cli: localCliInvocation(),
 });
 const mcp = new Server(
-  { name: "agentroom-receiver", version: "0.6.1" },
+  { name: "agentroom-receiver", version: "0.6.2" },
   {
     capabilities: { tools: {} },
     instructions:
