@@ -85,6 +85,85 @@ Install or update `backend/deploy/nginx/try-status.online.conf` manually during
 the initial bootstrap or an intentional gateway change, then run `nginx -t`
 before reloading Nginx.
 
+## Automatic deployment from a release tag
+
+The repository workflow
+[`../../.github/workflows/deploy-release.yml`](../../.github/workflows/deploy-release.yml)
+runs only when a semantic tag matching `release-v*` is pushed. It accepts tags
+such as `release-v0.8.1` or `release-v0.8.1-rc.1`, rejects other names, and
+requires the tagged commit to be an ancestor of `origin/main`.
+
+The workflow has two jobs:
+
+1. `verify` installs the locked backend dependencies under Node.js 22, then
+   type-checks, tests, and builds the API and downloadable CLI. It has no
+   production environment and cannot read deployment secrets.
+2. `deploy` enters the GitHub `production` environment, configures a temporary
+   SSH identity with strict host-key checking, and calls the same
+   `backend/deploy/deploy.sh` used for manual releases. The script still owns
+   the deployment lock, PostgreSQL backup, immutable release, rollback, and
+   health checks.
+
+### One-time GitHub configuration
+
+In the repository, open **Settings -> Environments**, create an environment
+named `production`, and add these environment secrets:
+
+| Secret | Value |
+| --- | --- |
+| `DEPLOY_HOST` | `root@159.75.105.5` |
+| `DEPLOY_SSH_PRIVATE_KEY` | A dedicated unencrypted Ed25519 private key used only by this workflow |
+| `DEPLOY_KNOWN_HOSTS` | The verified `known_hosts` line for `159.75.105.5` |
+
+The server bootstrap currently requires a root SSH user. Generate a dedicated
+key on an administrator machine and install only its public half on the server:
+
+```bash
+ssh-keygen -t ed25519 -C agentroom-github-actions \
+  -f ./agentroom-github-actions -N ''
+ssh-copy-id -i ./agentroom-github-actions.pub root@159.75.105.5
+```
+
+Before creating `DEPLOY_KNOWN_HOSTS`, obtain and verify the host fingerprint.
+The fingerprint reported by a trusted server console must match the scan:
+
+```bash
+# Run on the server through a trusted console.
+ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+
+# Run on the administrator machine, then compare the fingerprint above.
+ssh-keyscan -H -t ed25519 159.75.105.5 >agentroom-known-hosts
+ssh-keygen -lf agentroom-known-hosts
+```
+
+Copy the full contents of `agentroom-known-hosts` into
+`DEPLOY_KNOWN_HOSTS`. Copy the full private key file, including its BEGIN/END
+lines, into `DEPLOY_SSH_PRIVATE_KEY`. Never commit either file. The workflow
+validates both files before it opens an SSH connection and the deploy script
+uses `StrictHostKeyChecking=yes` for both CI and manual deployments.
+
+Configure `production` required reviewers if the repository plan supports it,
+and restrict deployments to tags matching `release-v*`. Protect the same tag
+pattern in repository rules so an existing release tag cannot be moved.
+
+### Publishing a production release
+
+Push the release commit to `main`, then create a new annotated tag. Never move
+or reuse a published tag; increment the version for a retry:
+
+```bash
+git switch main
+git pull --ff-only
+git tag -a release-v0.8.1 -m "AgentRoom release v0.8.1"
+git push origin release-v0.8.1
+```
+
+The tag push starts **Deploy production release** in the Actions tab. If the
+environment has required reviewers, approve the `deploy` job after `verify`
+passes. A GitHub Release page is optional; deployment is triggered by the tag
+push itself. Do not push the first release tag until all three environment
+secrets are configured.
+
 Install the checked-in unit and Nginx configuration from `backend/deploy/`, run
 `systemctl daemon-reload`, validate with `nginx -t`, and reload rather than
 restarting Nginx. The production Nginx rule strips the external `/api/` prefix

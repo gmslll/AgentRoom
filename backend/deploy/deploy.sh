@@ -13,11 +13,14 @@ PUBLIC_BASE_URL=${AGENTROOM_PUBLIC_BASE_URL:-https://try-status.online/api}
 POSTGRES_CONTAINER=${AGENTROOM_POSTGRES_CONTAINER:-agentroom-postgres}
 POSTGRES_USER=${AGENTROOM_POSTGRES_USER:-agentroom}
 POSTGRES_DATABASE=${AGENTROOM_POSTGRES_DATABASE:-agentroom}
+SSH_IDENTITY_FILE=${AGENTROOM_SSH_IDENTITY_FILE:-}
+SSH_KNOWN_HOSTS_FILE=${AGENTROOM_SSH_KNOWN_HOSTS_FILE:-}
 BACKUP_DATABASE=1
 DRY_RUN=0
 
 SSH_OPTIONS=(
   -o BatchMode=yes
+  -o StrictHostKeyChecking=yes
   -o ConnectTimeout=10
   -o ServerAliveInterval=15
   -o ServerAliveCountMax=3
@@ -46,6 +49,8 @@ Environment overrides:
   AGENTROOM_POSTGRES_CONTAINER
   AGENTROOM_POSTGRES_USER
   AGENTROOM_POSTGRES_DATABASE
+  AGENTROOM_SSH_IDENTITY_FILE
+  AGENTROOM_SSH_KNOWN_HOSTS_FILE
 EOF
 }
 
@@ -101,6 +106,23 @@ require_command git
 require_command ssh
 require_command tar
 require_command curl
+
+if [[ -n "$SSH_IDENTITY_FILE" ]]; then
+  [[ -f "$SSH_IDENTITY_FILE" && -r "$SSH_IDENTITY_FILE" ]] ||
+    fail "AGENTROOM_SSH_IDENTITY_FILE must be a readable regular file"
+  SSH_OPTIONS+=(
+    -i "$SSH_IDENTITY_FILE"
+    -o IdentitiesOnly=yes
+  )
+fi
+
+if [[ -n "$SSH_KNOWN_HOSTS_FILE" ]]; then
+  [[ -f "$SSH_KNOWN_HOSTS_FILE" && -r "$SSH_KNOWN_HOSTS_FILE" ]] ||
+    fail "AGENTROOM_SSH_KNOWN_HOSTS_FILE must be a readable regular file"
+  SSH_OPTIONS+=(
+    -o "UserKnownHostsFile=$SSH_KNOWN_HOSTS_FILE"
+  )
+fi
 
 [[ "$DEPLOY_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9._:@-]*$ ]] ||
   fail "Unsafe SSH destination: $DEPLOY_HOST"

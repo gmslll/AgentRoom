@@ -32,7 +32,8 @@ shared OpenAPI contract at `/openapi.yaml`. In production these are exposed as
 
 Once a production host has been bootstrapped, deploy the committed `HEAD` with
 `./deploy/deploy.sh`. See [`docs/deployment.md`](docs/deployment.md) for
-prerequisites, overrides, backup behavior, and rollback guarantees.
+prerequisites, overrides, backup behavior, rollback guarantees, and the
+`release-v*` GitHub Actions release flow.
 
 For persistent mode, create a database, set `DATABASE_URL`, apply migrations,
 and then start the service:

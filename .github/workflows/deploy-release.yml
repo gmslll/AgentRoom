@@ -1,0 +1,127 @@
+name: Deploy production release
+
+on:
+  push:
+    tags:
+      - "release-v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agentroom-production
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify tagged commit
+    if: github.event.deleted == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out tagged commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate release tag and ancestry
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$GITHUB_REF_TYPE" == "tag" ]]
+          [[ "$GITHUB_REF_NAME" =~ ^release-v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]]
+          release_commit=$(git rev-parse --verify HEAD^{commit})
+          git show-ref --verify --quiet refs/remotes/origin/main
+          git merge-base --is-ancestor "$release_commit" refs/remotes/origin/main
+          [[ "$release_commit" == "$GITHUB_SHA" ]]
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        run: npm --prefix backend ci
+
+      - name: Type-check backend
+        run: npm --prefix backend run typecheck
+
+      - name: Test backend
+        run: npm --prefix backend test
+
+      - name: Build backend and CLI release
+        run: npm --prefix backend run build
+
+  deploy:
+    name: Deploy to try-status.online
+    if: github.event.deleted == false
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment:
+      name: production
+      url: https://try-status.online/api/health
+    steps:
+      - name: Check out tagged commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Configure production SSH identity
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+        run: |
+          set -Eeuo pipefail
+          [[ -n "$DEPLOY_HOST" ]] || {
+            echo "production secret DEPLOY_HOST is missing" >&2
+            exit 1
+          }
+          [[ -n "$DEPLOY_KNOWN_HOSTS" ]] || {
+            echo "production secret DEPLOY_KNOWN_HOSTS is missing" >&2
+            exit 1
+          }
+          [[ -n "$DEPLOY_SSH_PRIVATE_KEY" ]] || {
+            echo "production secret DEPLOY_SSH_PRIVATE_KEY is missing" >&2
+            exit 1
+          }
+
+          ssh_dir="$RUNNER_TEMP/agentroom-ssh"
+          install -d -m 0700 "$ssh_dir"
+          printf '%s\n' "$DEPLOY_SSH_PRIVATE_KEY" >"$ssh_dir/id_ed25519"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" >"$ssh_dir/known_hosts"
+          chmod 0600 "$ssh_dir/id_ed25519" "$ssh_dir/known_hosts"
+          ssh-keygen -y -f "$ssh_dir/id_ed25519" >/dev/null
+          ssh-keygen -l -f "$ssh_dir/known_hosts" >/dev/null
+
+          {
+            printf 'AGENTROOM_DEPLOY_HOST=%s\n' "$DEPLOY_HOST"
+            printf 'AGENTROOM_DEPLOY_REF=%s\n' "$GITHUB_SHA"
+            printf 'AGENTROOM_PUBLIC_BASE_URL=%s\n' \
+              'https://try-status.online/api'
+            printf 'AGENTROOM_SSH_IDENTITY_FILE=%s\n' \
+              "$ssh_dir/id_ed25519"
+            printf 'AGENTROOM_SSH_KNOWN_HOSTS_FILE=%s\n' \
+              "$ssh_dir/known_hosts"
+          } >>"$GITHUB_ENV"
+
+      - name: Deploy immutable backend release
+        run: ./backend/deploy/deploy.sh
+
+      - name: Record deployment summary
+        if: success()
+        shell: bash
+        run: |
+          {
+            printf '## AgentRoom production deployment\n\n'
+            printf -- '- Tag: `%s`\n' "$GITHUB_REF_NAME"
+            printf -- '- Commit: `%s`\n' "$GITHUB_SHA"
+            printf -- '- Health: https://try-status.online/api/health\n'
+            printf -- '- Swagger: https://try-status.online/api/docs\n'
+          } >>"$GITHUB_STEP_SUMMARY"

@@ -5,6 +5,7 @@
 WebSocket 事件的唯一协议源是
 [`../shared/contracts/realtime/event.schema.json`](../shared/contracts/realtime/event.schema.json)。
 前端不要直接导入 `backend/src/` 内部类型。
+需要快速交接时先看 [`frontend-change-checklist.md`](./frontend-change-checklist.md)。
 
 ## 0. 产品背景
 
@@ -62,10 +63,11 @@ AgentRoom 是一个允许人类、本地终端和 AI Agent 共同参与的网页
 - 只有明确的 `agent.task` 才会触发 AI，并且必须选择具体 agent 成员。
 - 当前只有房间 owner 可以触发 agent，避免加入房间的人随意控制别人的本地终端。
 - 一个任务可以同时发给多个 agent；每个 agent 都有独立 delivery 和状态。
-- agent 的最终回复是普通可见消息，不会自动继续触发另一个 agent。Agent 之间继续
-  协作需要人类或 owner 再创建一个明确任务。
-- 成员出现在列表里只表示“已经加入过房间”，不表示此刻在线。当前还没有 presence
-  心跳接口，前端不要仅凭成员列表或 `member.joined` 显示绿色在线状态。
+- agent 的最终回复是普通可见消息，默认不会继续触发另一个 agent；Bridge 可以在
+  回复时显式提交 `relay`，由后端创建新的 `agent.task` 完成自动交接。网页只需要像
+  普通任务一样展示新消息和 delivery，不要根据回复文本自行触发 AI。
+- 成员出现在列表里只表示“已经加入过房间”，不表示此刻在线。在线状态必须来自
+  `GET /presence` 和 `member.presence`，不能根据 `member.joined` 猜测。
 - Bridge 必须在用户本机运行，离线的 Bridge 不会立即处理任务；任务会保留为待处理
   delivery，Bridge 恢复连接后再拉取。
 - 聊天消息以 PostgreSQL 为最终事实来源，WebSocket 用于低延迟通知；断线后必须通过
@@ -73,9 +75,11 @@ AgentRoom 是一个允许人类、本地终端和 AI Agent 共同参与的网页
 
 ### 当前 MVP 边界
 
-当前后端已经完成账号、房间、成员、文字消息、AI 任务投递、Claude/Codex Bridge、
-PostgreSQL 持久化和单进程实时消息。产品目标中的文件共享会支持各种文件，但上传、
-对象存储、扫描和下载授权尚未实现，所以当前前端先完成纯文字与 AI 协作流程。
+当前后端已经完成账号、房间、成员、文字消息、附件协议、AI 任务投递、成员移除、
+presence、房间审核规则、Claude/Codex Bridge、PostgreSQL 持久化，以及可选的 Redis、
+S3、SMTP、OAuth 和远程 MCP 接入。文件字节直传 S3 兼容对象存储；前端可以实现附件
+流程，但上线开关应等生产环境完成对象存储和 CORS 配置。邮件、OAuth、审核和远程
+MCP 同样是配置型能力，不能只因路由存在就假定生产环境已经启用。
 
 ## 1. 启动与环境
 
@@ -249,6 +253,23 @@ Content-Type: application/json
 应用启动时如果本地存在令牌，先请求 `/v1/auth/me`。收到
 `401 INVALID_SESSION` 或 `401 AUTH_REQUIRED` 时清除账号令牌并进入登录页。
 
+### 邮箱、密码与 OAuth
+
+- `POST /v1/auth/email/verification`：登录后申请邮箱验证码，返回 `202`。
+- `POST /v1/auth/email/verify`：提交 `{ "code": "..." }`，返回更新后的 `user`；
+  `user.emailVerifiedAt` 非空时显示“已验证”。
+- `POST /v1/auth/password/reset-request`：提交邮箱，已注册和未注册邮箱都返回 `202`，
+  前端不能据此判断账号是否存在。
+- `POST /v1/auth/password/reset`：提交 `email`、`code`、`newPassword`。成功后其他登录
+  会话会被撤销，当前页面应返回登录页。
+- `POST /v1/auth/password/change`：提交 `currentPassword`、`newPassword`。成功返回
+  `204`，当前会话保留，其他会话撤销。
+- `GET /v1/auth/oauth/google/authorize` 与 `/github/authorize`：直接让浏览器导航过去，
+  不要用 `fetch`。成功回调会重定向到 `FRONTEND_URL`，令牌位于 URL hash fragment；
+  前端读取后必须立刻用 `history.replaceState` 清掉 fragment，再调用 `/auth/me`。
+
+OAuth 未配置时返回 `OAUTH_NOT_CONFIGURED`。按钮是否上线由前后端部署配置共同决定。
+
 ## 4. 聊天室流程
 
 ### 我的聊天室
@@ -334,6 +355,10 @@ Content-Type: application/json
 
 - `GET /v1/rooms/{roomId}/members`：获取成员列表。发送 AI 任务时使用这里的
   agent 成员 ID。
+- `DELETE /v1/rooms/{roomId}/members/{memberId}`：owner 移除成员并立即撤销其成员
+  令牌；owner 自己不能被移除。成功后从列表移除该成员并处理 `member.removed`。
+- `GET /v1/rooms/{roomId}/presence`：返回 `{ items: MemberPresence[] }`。进入房间时先
+  拉一次，之后合并 `member.presence` 事件；`lastSeenAt: null` 表示尚无可用记录。
 - `POST /v1/rooms/{roomId}/invite-code/rotate`：仅 owner 可用；旧邀请码立即失效，
   返回新 `inviteCode` 和 `connectorCommand`。
 
@@ -440,7 +465,8 @@ Content-Type: application/json
 ```
 
 成功返回 `201` 和 `{ message, deliveries: [] }`。普通文字不能带
-`targetMemberIds` 或 `idempotencyKey`，也不会触发 AI。
+`targetMemberIds` 或 `idempotencyKey`，也不会触发 AI；可以带最多 10 个已经完成且
+未被标记的 `attachmentIds`。
 
 ### 显式触发 AI
 
@@ -470,6 +496,51 @@ Content-Type: application/json
 
 `GET /deliveries/pending`、delivery 状态更新和 reply 接口是 AI Bridge 使用的，
 普通网页不应调用。网页通过消息事件和 `delivery.updated` 展示执行状态。
+
+### delivery 状态和本地 session-card
+
+Bridge 会先在目标项目的 `.agentroom/session-cards/` 下持久化一张本地 session-card，
+然后才把 delivery 更新为 `received`。这只是 Claude/Codex 所在设备上的可靠性和诊断
+证据，不是新的 HTTP/WebSocket 字段，浏览器也不应尝试读取它。
+
+前端状态文案必须按下面的语义展示：
+
+| 状态 | 推荐文案 | 精确含义 |
+| --- | --- | --- |
+| `queued` | 等待终端 | 服务端已持久化，目标 Bridge 尚未确认 |
+| `received` | 已送达终端 | Bridge 已接收并落盘；不等于 AI 已经读取 |
+| `running` | AI 处理中 | Bridge 已开始 provider 调用 |
+| `replied` | 已回复 | 最终回复消息已经写入聊天室 |
+| `failed` | 执行失败 | delivery 终止；可按 `error` 给出简短错误提示 |
+
+不要把 `received` 写成“AI 已读”，不要在 UI、日志或错误上报中暴露目标机器的绝对
+工作区路径、session-card 路径或本地证据文件。Claude/Codex 的更细粒度本地证据只供
+CLI 和终端排障使用。
+
+### 文件与附件
+
+附件采用三段式直传，文件字节不经过 AgentRoom API：
+
+1. `POST /v1/rooms/{roomId}/files/upload-intents`，提交 `name`、`mediaType`、`size`，
+   可选小写十六进制 `sha256`；服务端返回 `fileId`、`presignedUrl`、`expiresAt`。
+2. 对 `presignedUrl` 发 `PUT` 上传原始字节。`Content-Type` 必须与 intent 一致；如果
+   提交了 SHA-256，还要按对象存储签名要求携带对应 checksum。对象存储必须允许前端
+   Origin、`PUT` 和所需请求头。
+3. `POST /v1/rooms/{roomId}/files/{fileId}/complete`。只有上传者可以完成；成功后把
+   返回的 `attachment.id` 放进普通 `text` 消息的 `attachmentIds`。
+
+消息列表只返回附件 ID。渲染附件时可先用
+`GET /v1/rooms/{roomId}/attachments` 建立元数据索引，点击下载时再调用
+`GET /v1/rooms/{roomId}/attachments/{attachmentId}` 获取短期下载 URL；不要持久化
+签名 URL。`pending` 不允许发送，`flagged` 不允许下载，单文件和房间配额错误为
+`413 FILE_TOO_LARGE` / `ROOM_FILE_QUOTA_EXCEEDED`。当前 `agent.task` 不能携带附件。
+
+### 房间审核规则
+
+owner 可以通过 `GET/POST/DELETE /v1/rooms/{roomId}/moderation/rules` 管理大小写不
+敏感的子串规则。`flag` 允许消息进入聊天室，并在 `message.moderation` 标出结果；
+`reject` 拒绝发送。该功能由生产配置控制，普通成员只渲染返回的审核结果，不调用
+规则管理接口。
 
 ## 6. WebSocket 实时对接
 
@@ -518,6 +589,8 @@ async function connectRoomRealtime(roomId: string, accountToken: string) {
 | 事件 | 前端处理 |
 | --- | --- |
 | `member.joined` | 更新成员列表 |
+| `member.removed` | 移除成员；如果是当前成员则关闭房间会话并返回列表 |
+| `member.presence` | 合并 `online` 和 `lastSeenAt`，作为唯一在线状态来源 |
 | `message.created` | 按 message ID 去重后加入消息列表 |
 | `delivery.updated` | 更新 AI 任务状态 |
 | `delivery.queued` | 只发给目标 AI，普通人类客户端通常不会收到 |
@@ -568,14 +641,16 @@ async function connectRoomRealtime(roomId: string, accountToken: string) {
 3. 创建房间、邀请码展示与加入房间。
 4. 房间历史消息与普通文字发送。
 5. WebSocket 实时消息和断线补偿。
-6. 成员列表、AI 在线接入展示。
-7. owner 选择 agent 并发送 `agent.task`，展示 delivery 状态。
+6. 成员列表、presence、成员移除与 AI 在线接入展示。
+7. owner 选择 agent 并发送 `agent.task`，按 session-card 语义展示 delivery 状态。
+8. 文件直传、附件消息和短期下载 URL。
+9. 邮箱验证、密码恢复/修改；OAuth 和审核按生产开关接入。
 
 ## 9. 当前不要接的能力
 
-- 文件上传、下载和附件元数据尚未实现；当前消息中的 `attachmentIds` 恒为空。
-- 邮箱验证、找回密码、修改密码、OAuth 尚未实现。
-- 踢出成员和成员令牌撤销尚未实现。
-- 多实例 WebSocket fan-out 和分布式限流尚未接 Redis；当前实时事件只在单个后端
-  进程内广播。
+- 浏览器不要调用 AI Bridge 专用的 pending/status/reply 接口，也不要读取本地
+  session-card。
+- 浏览器不要直接接远程 `/mcp`；它是 MCP 客户端的 Streamable HTTP 入口。
+- 文件、OAuth、邮件、审核、远程 MCP 的路由已实现，但产品 UI 上线前仍需确认对应
+  生产环境配置。未确认前使用功能开关隐藏入口。
 - CLI 要求 Node.js 22+；安装器不会自动安装 Node.js、Claude Code 或 Codex CLI。
