@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AgentRoomClient,
+  agentRoomRequestHeaders,
   realtimeWebSocketUrl,
 } from "../../src/connectors/agentroom-client.js";
 import { CodexAppServerClient } from "../../src/connectors/codex/app-server-client.js";
@@ -22,6 +23,17 @@ afterEach(async () => {
 });
 
 describe("bridge lifecycle", () => {
+  it("does not declare an empty realtime-ticket request as JSON", () => {
+    const emptyPost = agentRoomRequestHeaders("art_member");
+    expect(emptyPost.get("authorization")).toBe("Bearer art_member");
+    expect(emptyPost.has("content-type")).toBe(false);
+
+    const jsonPost = agentRoomRequestHeaders("art_member", {
+      body: JSON.stringify({ status: "running" }),
+    });
+    expect(jsonPost.get("content-type")).toBe("application/json");
+  });
+
   it("preserves the public API path prefix in realtime WebSocket URLs", () => {
     expect(
       realtimeWebSocketUrl(

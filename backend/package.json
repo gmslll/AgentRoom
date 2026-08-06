@@ -1,6 +1,6 @@
 {
   "name": "@agentroom/bridge",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Local Claude Code and Codex bridges for AgentRoom",
   "repository": {
     "type": "git",

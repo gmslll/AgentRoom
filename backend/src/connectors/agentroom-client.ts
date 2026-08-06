@@ -179,11 +179,7 @@ export class AgentRoomClient {
     const response = await fetch(`${this.config.baseUrl}${path}`, {
       ...init,
       signal,
-      headers: {
-        authorization: `Bearer ${this.config.accessToken}`,
-        "content-type": "application/json",
-        ...init.headers,
-      },
+      headers: agentRoomRequestHeaders(this.config.accessToken, init),
     });
 
     if (!response.ok) {
@@ -195,6 +191,22 @@ export class AgentRoomClient {
 
     return (await response.json()) as T;
   }
+}
+
+export function agentRoomRequestHeaders(
+  accessToken: string,
+  init: Pick<RequestInit, "body" | "headers"> = {},
+): Headers {
+  const headers = new Headers(init.headers);
+  headers.set("authorization", `Bearer ${accessToken}`);
+  if (
+    init.body !== undefined &&
+    init.body !== null &&
+    !headers.has("content-type")
+  ) {
+    headers.set("content-type", "application/json");
+  }
+  return headers;
 }
 
 export function realtimeWebSocketUrl(
