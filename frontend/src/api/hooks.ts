@@ -17,6 +17,7 @@ import { ApiError } from "./client";
 import type {
   AgentTaskInput,
   LoginInput,
+  Message,
   RegisterInput,
   SendMessageResult,
   TextMessageInput,
@@ -208,22 +209,41 @@ export function useRotateInvite(roomId: string) {
 }
 
 /**
- * Loads history up to the current watermark (or a full page when empty) and
- * merges it into the message store. Returns whether older messages remain.
+ * Loads history by walking pages from sequence 0 to the tail, merging into
+ * the message store. The API only supports ascending `afterSequence` (no
+ * beforeSequence contract), so this is the only way to show the newest
+ * messages on entry. The cap guards against unbounded loops.
  */
+const MAX_HISTORY_PAGES = 20; // 20 × 50 = 1000 messages
+const HISTORY_PAGE_SIZE = 50;
+
 export function useMessageHistory(roomId: string) {
   const token = useAuthToken();
   const upsertMessages = useMessageStore((state) => state.upsertMessages);
   const setHasOlder = useMessageStore((state) => state.setHasOlder);
-  const watermark = useMessageStore((state) => state.watermark);
 
   return useQuery({
-    queryKey: [...AUTH_KEYS.messages(roomId), "history", watermark],
+    queryKey: [...AUTH_KEYS.messages(roomId), "history"],
     queryFn: async () => {
-      const result = await listMessages(token as string, roomId, watermark, 50);
-      upsertMessages(result.items);
-      setHasOlder(result.nextAfterSequence > 0);
-      return result;
+      let after = 0;
+      let nextAfter = 0;
+      const items: Message[] = [];
+      for (let page = 0; page < MAX_HISTORY_PAGES; page++) {
+        const result = await listMessages(
+          token as string,
+          roomId,
+          after,
+          HISTORY_PAGE_SIZE,
+        );
+        items.push(...result.items);
+        nextAfter = result.nextAfterSequence;
+        if (result.items.length === 0 || nextAfter <= after) break;
+        after = nextAfter;
+      }
+      upsertMessages(items);
+      // Walked from 0, so nothing older exists beyond the current store.
+      setHasOlder(false);
+      return { items, nextAfterSequence: nextAfter };
     },
     enabled: Boolean(token) && Boolean(roomId),
     staleTime: 0,

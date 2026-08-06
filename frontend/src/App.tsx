@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useCurrentUser } from "./api/hooks";
+import { ToastHost } from "./components/ToastHost";
 import LoginPage from "./pages/LoginPage";
 import RoomPage from "./pages/RoomPage";
 import RoomsPage from "./pages/RoomsPage";
@@ -17,12 +18,15 @@ export default function App() {
   useCurrentUser();
 
   return (
-    <Routes>
-      <Route path="/" element={<RootRedirect />} />
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/rooms" element={<RoomsPage />} />
-      <Route path="/rooms/:roomId" element={<RoomPage />} />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    <>
+      <Routes>
+        <Route path="/" element={<RootRedirect />} />
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/rooms" element={<RoomsPage />} />
+        <Route path="/rooms/:roomId" element={<RoomPage />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+      <ToastHost />
+    </>
   );
 }

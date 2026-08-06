@@ -13,14 +13,16 @@ import { DeliveryStatusBadge } from "./DeliveryStatusBadge";
 
 interface MessageBubbleProps {
   message: Message;
+  /** Called when the user re-dispatches an agent reply to another AI. */
+  onDispatchReply?: (message: Message) => void;
 }
 
 /** One message: plain text, agent task with delivery states, or agent reply. */
-export function MessageBubble({ message }: MessageBubbleProps) {
+export function MessageBubble({ message, onDispatchReply }: MessageBubbleProps) {
   const { author } = message;
 
   if (message.kind === "agent.reply") {
-    return <AgentReply message={message} />;
+    return <AgentReply message={message} onDispatch={onDispatchReply} />;
   }
   if (message.kind === "agent.task") {
     return <AgentTask message={message} />;
@@ -109,7 +111,13 @@ function TaskDeliveryRow({ delivery }: { delivery: AgentDelivery }) {
   );
 }
 
-function AgentReply({ message }: MessageBubbleProps) {
+function AgentReply({
+  message,
+  onDispatch,
+}: {
+  message: Message;
+  onDispatch?: (message: Message) => void;
+}) {
   const [collapsed, setCollapsed] = useState(false);
   return (
     <div className="border-l-2 border-agent/50 px-4 py-2 pl-5 hover:bg-surface/40">
@@ -134,9 +142,21 @@ function AgentReply({ message }: MessageBubbleProps) {
         </span>
       </button>
       {!collapsed && (
-        <p className="mt-1 whitespace-pre-wrap break-words text-sm text-text/90">
-          {message.text}
-        </p>
+        <>
+          <p className="mt-1 whitespace-pre-wrap break-words text-sm text-text/90">
+            {message.text}
+          </p>
+          {onDispatch && (
+            <button
+              type="button"
+              onClick={() => onDispatch(message)}
+              className="mt-2 rounded border border-agent/40 px-2 py-0.5 text-[11px] text-agent transition-colors hover:bg-agent/10"
+              title="将这份回复作为上下文,派发给另一个 AI 继续处理"
+            >
+              转派给…
+            </button>
+          )}
+        </>
       )}
     </div>
   );

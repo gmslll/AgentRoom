@@ -20,8 +20,10 @@ import { useTokenStore } from "../stores/tokenStore";
 import { ConnectPanel } from "../components/ConnectPanel";
 import { MemberPanel } from "../components/MemberPanel";
 import { MessageList } from "../components/MessageList";
-import { TaskComposer } from "../components/TaskComposer";
+import { TaskComposer, type TaskComposerPreset } from "../components/TaskComposer";
 import { formatDate } from "../lib/time";
+import { toastError } from "../stores/toastStore";
+import type { Message } from "../api/types";
 
 export default function RoomPage() {
   const { roomId = "" } = useParams();
@@ -32,6 +34,7 @@ export default function RoomPage() {
 
   const [waitingForAgent, setWaitingForAgent] = useState(false);
   const [rightTab, setRightTab] = useState<"members" | "connect">("members");
+  const [taskPreset, setTaskPreset] = useState<TaskComposerPreset | null>(null);
 
   // Store actions.
   const upsertMessages = useMessageStore((state) => state.upsertMessages);
@@ -70,7 +73,25 @@ export default function RoomPage() {
     ) {
       return;
     }
-    removeMemberMutation.mutate(memberId);
+    removeMemberMutation.mutate(memberId, {
+      onError: (error) => toastError(error, "移除成员失败"),
+    });
+  };
+
+  /** Opens dispatch mode pre-selecting one agent (member panel action). */
+  const handleDispatchTo = (memberId: string) => {
+    setTaskPreset({
+      key: `member-${memberId}-${Date.now()}`,
+      targetMemberIds: [memberId],
+    });
+  };
+
+  /** Opens dispatch mode pre-filling the reply as context ("re-dispatch"). */
+  const handleDispatchReply = (message: Message) => {
+    setTaskPreset({
+      key: `reply-${message.id}-${Date.now()}`,
+      text: `将以下结果转派给下一个 AI 继续处理:\n\n${message.text}`,
+    });
   };
 
   // Reset per-room state when switching rooms.
@@ -195,9 +216,14 @@ export default function RoomPage() {
                     hasOlder={hasOlder}
                     loadingOlder={false}
                     onLoadOlder={() => undefined}
+                    onDispatchReply={handleDispatchReply}
                   />
                 </div>
-                <TaskComposer roomId={roomId} isOwner={Boolean(isOwner)} />
+                <TaskComposer
+                  roomId={roomId}
+                  isOwner={Boolean(isOwner)}
+                  preset={taskPreset}
+                />
               </>
             ) : (
               <div className="flex-1 overflow-y-auto">
@@ -241,6 +267,7 @@ export default function RoomPage() {
                 <MemberPanel
                   isOwner={Boolean(isOwner)}
                   myMemberId={myMemberId}
+                  onDispatchTask={handleDispatchTo}
                   onRemoveMember={handleRemoveMember}
                 />
               ) : (
@@ -283,6 +310,18 @@ function JoinRoomForm({ roomId }: { roomId: string }) {
       if (err instanceof ApiError) {
         if (err.code === "ACCOUNT_ALREADY_MEMBER") {
           setError("你已经是这个房间的成员,请刷新重试");
+          return;
+        }
+        if (err.status === 404) {
+          setError("房间不存在或已被删除");
+          return;
+        }
+        if (err.status === 503) {
+          setError("服务暂不可用,请稍后重试");
+          return;
+        }
+        if (err.status === 429) {
+          setError("尝试过于频繁,请稍后再试");
           return;
         }
         setError(err.message);

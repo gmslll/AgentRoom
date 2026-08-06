@@ -9,6 +9,8 @@ interface MessageListProps {
   hasOlder: boolean;
   loadingOlder: boolean;
   onLoadOlder: () => void;
+  /** Called when the user re-dispatches an agent reply to another AI. */
+  onDispatchReply?: (message: Message) => void;
   /** Scroll container ref for auto-scroll control. */
   scrollRef?: Ref<HTMLDivElement>;
 }
@@ -19,6 +21,7 @@ export function MessageList({
   hasOlder,
   loadingOlder,
   onLoadOlder,
+  onDispatchReply,
   scrollRef,
 }: MessageListProps) {
   const messages = useMessageStore(
@@ -50,7 +53,11 @@ export function MessageList({
           </p>
         ) : (
           messages.map((message: Message) => (
-            <MessageBubble key={message.id} message={message} />
+            <MessageBubble
+              key={message.id}
+              message={message}
+              onDispatchReply={onDispatchReply}
+            />
           ))
         )}
       </div>

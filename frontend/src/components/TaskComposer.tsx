@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ApiError } from "../api/client";
 import { useSendTask, useSendText } from "../api/hooks";
 import { useShallow } from "zustand/react/shallow";
@@ -6,9 +6,18 @@ import { newIdempotencyKey } from "../lib/idempotency";
 import { providerLabel } from "../lib/provider";
 import { useMemberStore } from "../stores/memberStore";
 
+export interface TaskComposerPreset {
+  /** Unique token per preset; changing it re-applies the preset. */
+  key: string;
+  text?: string;
+  targetMemberIds?: string[];
+}
+
 interface TaskComposerProps {
   roomId: string;
   isOwner: boolean;
+  /** Preset that opens dispatch mode with pre-filled text/targets. */
+  preset?: TaskComposerPreset | null;
 }
 
 const MAX_TARGETS = 10;
@@ -18,12 +27,23 @@ const MAX_TARGETS = 10;
  * switch into task-dispatch mode and select explicit agent targets. The
  * idempotency key is generated once per dispatch and reused across retries.
  */
-export function TaskComposer({ roomId, isOwner }: TaskComposerProps) {
+export function TaskComposer({ roomId, isOwner, preset }: TaskComposerProps) {
   const [text, setText] = useState("");
   const [dispatchMode, setDispatchMode] = useState(false);
   const [targets, setTargets] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const idempotencyKeyRef = useRef<string | null>(null);
+
+  // Apply a dispatch preset (e.g. "re-dispatch this reply" or "dispatch to
+  // this member") each time its key changes.
+  useEffect(() => {
+    if (!preset) return;
+    setText(preset.text ?? "");
+    setTargets(new Set(preset.targetMemberIds ?? []));
+    setDispatchMode(true);
+    setError(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preset?.key]);
 
   const sendText = useSendText(roomId);
   const sendTask = useSendTask(roomId);
