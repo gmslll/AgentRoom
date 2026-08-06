@@ -2,7 +2,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AgentRoomClient } from "../../src/connectors/agentroom-client.js";
+import {
+  AgentRoomClient,
+  realtimeWebSocketUrl,
+} from "../../src/connectors/agentroom-client.js";
 import { CodexAppServerClient } from "../../src/connectors/codex/app-server-client.js";
 import { CodexTaskRunner } from "../../src/connectors/codex/runner.js";
 import { saveCodexState } from "../../src/connectors/codex/state.js";
@@ -19,6 +22,20 @@ afterEach(async () => {
 });
 
 describe("bridge lifecycle", () => {
+  it("preserves the public API path prefix in realtime WebSocket URLs", () => {
+    expect(
+      realtimeWebSocketUrl(
+        "https://try-status.online/api",
+        "ticket/with spaces",
+      ).toString(),
+    ).toBe(
+      "wss://try-status.online/api/v1/realtime?ticket=ticket%2Fwith+spaces",
+    );
+    expect(
+      realtimeWebSocketUrl("http://127.0.0.1:8787", "ticket_1").toString(),
+    ).toBe("ws://127.0.0.1:8787/v1/realtime?ticket=ticket_1");
+  });
+
   it("treats an aborted realtime listener as a clean shutdown", async () => {
     const controller = new AbortController();
     controller.abort();

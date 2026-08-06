@@ -25,7 +25,7 @@ const forwardedInThisProcess = new Set<string>();
 const forwardingInThisProcess = new Set<string>();
 
 const mcp = new Server(
-  { name: "agentroom", version: "0.2.2" },
+  { name: "agentroom", version: "0.2.3" },
   {
     capabilities: {
       experimental: { "claude/channel": {} },

@@ -98,10 +98,7 @@ export class AgentRoomClient {
       `/v1/rooms/${encodeURIComponent(this.config.roomId)}/realtime-tickets`,
       { method: "POST" },
     );
-    const url = new URL(this.config.baseUrl);
-    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-    url.pathname = "/v1/realtime";
-    url.search = new URLSearchParams({ ticket }).toString();
+    const url = realtimeWebSocketUrl(this.config.baseUrl, ticket);
 
     await new Promise<void>((resolvePromise, reject) => {
       const socket = new WebSocket(url);
@@ -198,6 +195,18 @@ export class AgentRoomClient {
 
     return (await response.json()) as T;
   }
+}
+
+export function realtimeWebSocketUrl(
+  baseUrl: string,
+  ticket: string,
+): URL {
+  const url = new URL(baseUrl);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  const basePath = url.pathname === "/" ? "" : url.pathname.replace(/\/+$/, "");
+  url.pathname = `${basePath}/v1/realtime`;
+  url.search = new URLSearchParams({ ticket }).toString();
+  return url;
 }
 
 function isPong(value: unknown): boolean {

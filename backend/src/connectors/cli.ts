@@ -42,7 +42,7 @@ declare const __AGENTROOM_CLI_DOWNLOAD_BASE__: string;
 const cliVersion =
   typeof __AGENTROOM_CLI_VERSION__ === "string"
     ? __AGENTROOM_CLI_VERSION__
-    : "0.2.2-dev";
+    : "0.2.3-dev";
 const cliDownloadBase =
   typeof __AGENTROOM_CLI_DOWNLOAD_BASE__ === "string"
     ? __AGENTROOM_CLI_DOWNLOAD_BASE__
