@@ -172,7 +172,6 @@ export function useRotateInvite(roomId: string) {
  */
 export function useMessageHistory(roomId: string) {
   const token = useAuthToken();
-  const queryClient = useQueryClient();
   const upsertMessages = useMessageStore((state) => state.upsertMessages);
   const setHasOlder = useMessageStore((state) => state.setHasOlder);
   const watermark = useMessageStore((state) => state.watermark);
@@ -183,9 +182,6 @@ export function useMessageHistory(roomId: string) {
       const result = await listMessages(token as string, roomId, watermark, 50);
       upsertMessages(result.items);
       setHasOlder(result.nextAfterSequence > 0);
-      void queryClient.invalidateQueries({
-        queryKey: AUTH_KEYS.messages(roomId),
-      });
       return result;
     },
     enabled: Boolean(token) && Boolean(roomId),
