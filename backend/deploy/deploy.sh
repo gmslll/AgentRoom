@@ -482,14 +482,14 @@ attempt=1
 while [[ "$attempt" -le 10 ]]; do
   if curl --max-time 8 --silent --fail \
       "$public_base_url/health" >/dev/null &&
-    curl --max-time 8 --silent --fail \
-      "$public_base_url/openapi.yaml" | grep -Fq "url: $public_base_url"; then
-    if curl --max-time 8 --silent --fail \
-        "$public_base_url/downloads/cli/manifest.json" |
-      grep -Fq '"schemaVersion":1'; then
-      public_healthy=1
-      break
-    fi
+    openapi_body=$(curl --max-time 8 --silent --fail \
+      "$public_base_url/openapi.yaml") &&
+    [[ "$openapi_body" == *"url: $public_base_url"* ]] &&
+    manifest_body=$(curl --max-time 8 --silent --fail \
+      "$public_base_url/downloads/cli/manifest.json") &&
+    [[ "$manifest_body" == *'"schemaVersion":1'* ]]; then
+    public_healthy=1
+    break
   fi
   sleep 1
   attempt=$((attempt + 1))
@@ -505,8 +505,8 @@ while [[ "$attempt" -le 10 ]]; do
     "$frontend_public_url/rooms" 2>/dev/null || true)
   asset_path=$(printf '%s' "$frontend_html" |
     sed -n 's/.*src="\([^"]*\.js\)".*/\1/p' | head -n 1)
-  if printf '%s' "$frontend_html" | grep -Fq '<div id="root"></div>' &&
-    printf '%s' "$deep_link_html" | grep -Fq '<div id="root"></div>' &&
+  if [[ "$frontend_html" == *'<div id="root"></div>'* ]] &&
+    [[ "$deep_link_html" == *'<div id="root"></div>'* ]] &&
     [[ "$asset_path" =~ ^/assets/[A-Za-z0-9._-]+\.js$ ]] &&
     curl --max-time 8 --silent --fail \
       "$frontend_public_url$asset_path" >/dev/null; then
