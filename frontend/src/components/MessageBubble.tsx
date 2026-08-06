@@ -28,7 +28,7 @@ export function MessageBubble({ message, onDispatchReply }: MessageBubbleProps) 
     return <AgentTask message={message} />;
   }
   return (
-    <div className="flex gap-3 px-4 py-2 hover:bg-surface/40">
+    <div className="animate-message-in flex gap-3 px-4 py-2 hover:bg-surface/40">
       <Avatar
         displayName={author.displayName}
         actorType={author.actorType}
@@ -58,14 +58,14 @@ function AgentTask({ message }: MessageBubbleProps) {
   );
 
   return (
-    <div className="px-4 py-2 hover:bg-surface/40">
+    <div className="animate-message-in px-4 py-2 hover:bg-surface/40">
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center gap-2 text-left"
+        className="flex w-full items-center gap-2 rounded-md border border-agent/20 bg-agent/[0.04] px-2 py-1.5 text-left transition-colors hover:border-agent/40 hover:bg-agent/[0.08]"
       >
         <span className="text-xs text-muted">{expanded ? "▾" : "▸"}</span>
-        <span className="rounded-full border border-agent/30 bg-agent/10 px-2 py-0.5 text-xs font-medium text-agent">
+        <span className="glow-agent rounded-full border border-agent/40 bg-agent/10 px-2 py-0.5 text-xs font-medium text-agent">
           任务
         </span>
         <span className="min-w-0 flex-1 truncate text-sm text-text">
@@ -94,7 +94,7 @@ function TaskDeliveryRow({ delivery }: { delivery: AgentDelivery }) {
   const name = member?.displayName ?? "AI";
   const provider = member?.agentProvider ?? null;
   return (
-    <div className="rounded-md border border-border bg-surface px-3 py-2">
+    <div className="animate-rise-in rounded-md border border-border bg-white/[0.03] px-3 py-2 transition-colors hover:border-white/10">
       <div className="flex items-center justify-between gap-2">
         <span className="flex items-center gap-1.5 text-xs text-text/80">
           <span className="text-muted">{providerLabel(provider)}</span>
@@ -120,7 +120,7 @@ function AgentReply({
 }) {
   const [collapsed, setCollapsed] = useState(false);
   return (
-    <div className="border-l-2 border-agent/50 px-4 py-2 pl-5 hover:bg-surface/40">
+    <div className="animate-message-in border-l-2 border-agent/50 bg-agent/[0.03] px-4 py-2 pl-5 shadow-[inset_2px_0_0_rgba(167,139,250,0.25)] hover:bg-agent/[0.05]">
       <button
         type="button"
         onClick={() => setCollapsed((v) => !v)}

@@ -39,7 +39,9 @@ export default function RoomsPage() {
   return (
     <div className="mx-auto flex min-h-full max-w-3xl flex-col bg-bg p-6">
       <header className="mb-6 flex items-center justify-between">
-        <h1 className="text-xl font-bold text-text">我的聊天室</h1>
+        <h1 className="text-gradient text-2xl font-extrabold tracking-tight">
+          我的聊天室
+        </h1>
         <div className="flex items-center gap-3 text-sm">
           <span className="text-muted">
             {user?.displayName ?? user?.email ?? ""}
@@ -62,12 +64,12 @@ export default function RoomsPage() {
           onChange={(e) => setRoomName(e.target.value)}
           placeholder="新聊天室名称"
           maxLength={100}
-          className="min-w-0 flex-1 rounded-md border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-muted/60 focus:border-primary focus:outline-none"
+          className="min-w-0 flex-1 rounded-md border border-border bg-black/25 px-3 py-2 text-sm text-text placeholder:text-muted/60 transition-shadow focus:border-primary/70 focus:shadow-[0_0_0_3px_rgba(91,140,255,0.15)] focus:outline-none"
         />
         <button
           type="submit"
           disabled={createRoom.isPending || roomName.trim().length === 0}
-          className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-primary-hover disabled:opacity-50"
+          className="press rounded-md bg-gradient-to-r from-primary to-[#7c6cff] px-4 py-2 text-sm font-medium text-white shadow-[0_4px_16px_rgba(91,140,255,0.35)] transition-shadow hover:shadow-[0_6px_22px_rgba(91,140,255,0.45)] disabled:opacity-50 disabled:shadow-none"
         >
           {createRoom.isPending ? "创建中…" : "创建聊天室"}
         </button>
@@ -86,12 +88,16 @@ export default function RoomsPage() {
         </div>
       ) : (
         <ul className="space-y-2">
-          {(rooms.data?.items ?? []).map(({ room, member }) => (
-            <li key={room.id}>
+          {(rooms.data?.items ?? []).map(({ room, member }, index) => (
+            <li
+              key={room.id}
+              className="animate-rise-in"
+              style={{ animationDelay: `${index * 45}ms` }}
+            >
               <button
                 type="button"
                 onClick={() => navigate(`/rooms/${room.id}`)}
-                className="flex w-full items-center justify-between rounded-lg border border-border bg-surface px-4 py-3 text-left transition-colors hover:border-border-strong hover:bg-surface-raised"
+                className="card-hover glass group flex w-full items-center justify-between rounded-xl px-4 py-3 text-left"
               >
                 <span className="min-w-0">
                   <span className="block truncate font-medium text-text">
@@ -102,7 +108,9 @@ export default function RoomsPage() {
                     {formatDate(room.createdAt)} 创建
                   </span>
                 </span>
-                <span className="text-muted">→</span>
+                <span className="text-muted transition-transform duration-150 group-hover:translate-x-0.5">
+                  →
+                </span>
               </button>
             </li>
           ))}

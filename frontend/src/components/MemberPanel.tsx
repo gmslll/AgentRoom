@@ -111,13 +111,13 @@ function MemberGroup({
                   <span className="truncate">{member.displayName}</span>
                   {onlineById[member.id] && (
                     <span
-                      className="inline-block size-1.5 shrink-0 rounded-full bg-terminal"
+                      className="glow-terminal inline-block size-1.5 shrink-0 animate-glow-pulse rounded-full bg-terminal"
                       title="在线"
                     />
                   )}
                 </p>
                 {member.actorType === "agent" && (
-                  <p className="text-[10px] uppercase tracking-wide text-agent">
+                  <p className="text-[10px] uppercase tracking-wide text-agent drop-shadow-[0_0_6px_rgba(167,139,250,0.5)]">
                     {providerLabel(member.agentProvider)}
                   </p>
                 )}

@@ -1,27 +1,93 @@
 @import "tailwindcss";
 
 @theme {
-  /* "Modern tool" dark theme (Slack/Discord/Linear family). */
+  /* Deep-space command deck tokens. */
   --color-bg: #0f1115;
+  --color-bg-deep: #0a0c12;
   --color-surface: #161a22;
   --color-surface-raised: #1d232e;
   --color-border: #262c38;
   --color-border-strong: #333b4a;
 
-  --color-text: #e6e9f0;
+  --color-text: #e8ecf4;
   --color-muted: #8b93a7;
 
   --color-human: #22d3ee; /* cyan */
   --color-agent: #a78bfa; /* purple */
   --color-terminal: #34d399; /* green */
 
-  --color-primary: #4f8cff;
+  --color-primary: #5b8cff;
   --color-primary-hover: #6ba0ff;
   --color-danger: #f87171;
   --color-warning: #fbbf24;
 
   --font-mono: ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas,
     monospace;
+
+  /* Animation tokens → generate animate-* utilities. */
+  --animate-message-in: message-in 0.24s ease-out both;
+  --animate-rise-in: rise-in 0.35s ease-out both;
+  --animate-glow-pulse: glow-pulse 2.4s ease-in-out infinite;
+  --animate-flow-x: flow-x 2.2s linear infinite;
+  --animate-spin-slow: spin 26s linear infinite;
+}
+
+@keyframes message-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes glow-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.25);
+  }
+}
+
+@keyframes flow-x {
+  from {
+    background-position: 200% 50%;
+  }
+  to {
+    background-position: -100% 50%;
+  }
+}
+
+@keyframes ambient-drift {
+  from {
+    background-position:
+      0% 0%,
+      100% 100%,
+      50% 50%;
+  }
+  to {
+    background-position:
+      80% 60%,
+      10% 30%,
+      90% 90%;
+  }
 }
 
 html,
@@ -30,9 +96,145 @@ body,
   height: 100%;
 }
 
+/* Deep-space backdrop: radial gradient + grid + ambient light patches. */
 body {
   background-color: var(--color-bg);
+  background-image: radial-gradient(
+    ellipse 120% 90% at 50% -10%,
+    #12151f 0%,
+    var(--color-bg-deep) 55%,
+    #0b0d13 100%
+  );
+  background-attachment: fixed;
   color: var(--color-text);
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     sans-serif;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(ellipse 90% 80% at 50% 0%, #000 30%, transparent 75%);
+}
+
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    radial-gradient(420px 420px at 20% 15%, rgba(34, 211, 238, 0.07), transparent 65%),
+    radial-gradient(480px 480px at 85% 70%, rgba(167, 139, 250, 0.07), transparent 65%),
+    radial-gradient(380px 380px at 60% 100%, rgba(52, 211, 153, 0.05), transparent 65%);
+  background-size: 100% 100%, 100% 100%, 100% 100%;
+  animation: ambient-drift 60s ease-in-out infinite alternate;
+}
+
+/* Glass panels. */
+@layer utilities {
+  .glass {
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+  }
+
+  .glass-strong {
+    background: rgba(22, 26, 34, 0.72);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+  }
+
+  .text-gradient {
+    background-image: linear-gradient(100deg, #6ba0ff 0%, #a78bfa 55%, #22d3ee 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .glow-human {
+    box-shadow: 0 0 14px rgba(34, 211, 238, 0.28);
+  }
+  .glow-agent {
+    box-shadow: 0 0 14px rgba(167, 139, 250, 0.3);
+  }
+  .glow-terminal {
+    box-shadow: 0 0 14px rgba(52, 211, 153, 0.28);
+  }
+  .glow-primary {
+    box-shadow: 0 0 18px rgba(91, 140, 255, 0.35);
+  }
+
+  .card-hover {
+    transition:
+      transform 0.18s ease,
+      border-color 0.18s ease,
+      box-shadow 0.18s ease,
+      background-color 0.18s ease;
+  }
+  .card-hover:hover {
+    transform: translateY(-2px);
+    border-color: rgba(255, 255, 255, 0.16);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  }
+  .card-hover:active {
+    transform: translateY(0);
+  }
+
+  .press {
+    transition:
+      transform 0.12s ease,
+      box-shadow 0.12s ease,
+      background-color 0.12s ease;
+  }
+  .press:hover {
+    transform: translateY(-1px);
+  }
+  .press:active {
+    transform: scale(0.96);
+  }
+}
+
+/* Scrollbars. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #2a3040;
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: #3d4659;
+}
+
+/* Visible keyboard focus. */
+:focus-visible {
+  outline: 2px solid rgba(91, 140, 255, 0.7);
+  outline-offset: 2px;
+}
+
+/* Respect reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

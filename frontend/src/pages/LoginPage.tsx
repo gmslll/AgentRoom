@@ -80,21 +80,23 @@ export default function LoginPage() {
 
   return (
     <div className="flex min-h-full items-center justify-center bg-bg p-4">
-      <div className="w-full max-w-sm rounded-xl border border-border bg-surface p-6 shadow-xl">
-        <h1 className="mb-1 text-xl font-bold text-text">AgentRoom</h1>
+      <div className="glass-strong animate-rise-in w-full max-w-sm rounded-2xl p-6 shadow-[0_20px_60px_rgba(0,0,0,0.5)]">
+        <h1 className="text-gradient mb-1 text-3xl font-extrabold tracking-tight">
+          AgentRoom
+        </h1>
         <p className="mb-5 text-sm text-muted">
           与本地终端和 AI Agent 共享的聊天室
         </p>
 
-        <div className="mb-5 flex rounded-lg border border-border p-0.5 text-sm">
+        <div className="glass mb-5 flex rounded-lg p-0.5 text-sm">
           {(["login", "register"] as const).map((m) => (
             <button
               key={m}
               type="button"
               onClick={() => switchMode(m)}
-              className={`flex-1 rounded-md px-3 py-1.5 transition-colors ${
+              className={`press flex-1 rounded-md px-3 py-1.5 transition-colors ${
                 mode === m
-                  ? "bg-surface-raised font-medium text-text"
+                  ? "bg-surface-raised/80 font-medium text-text shadow-[0_0_12px_rgba(91,140,255,0.15)]"
                   : "text-muted hover:text-text"
               }`}
             >
@@ -141,7 +143,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={mutation.isPending}
-            className="w-full rounded-lg bg-primary px-3 py-2 font-medium text-white transition-colors hover:bg-primary-hover disabled:opacity-60"
+            className="press w-full rounded-lg bg-gradient-to-r from-primary to-[#7c6cff] px-3 py-2 font-medium text-white shadow-[0_6px_20px_rgba(91,140,255,0.35)] transition-shadow hover:shadow-[0_8px_26px_rgba(91,140,255,0.45)] disabled:opacity-60 disabled:shadow-none"
           >
             {mutation.isPending
               ? "提交中…"
@@ -156,7 +158,7 @@ export default function LoginPage() {
 }
 
 const inputClass =
-  "w-full rounded-md border border-border bg-bg px-3 py-2 text-sm text-text placeholder:text-muted/60 focus:border-primary focus:outline-none";
+  "w-full rounded-md border border-border bg-black/25 px-3 py-2 text-sm text-text placeholder:text-muted/60 transition-shadow focus:border-primary/70 focus:shadow-[0_0_0_3px_rgba(91,140,255,0.15)] focus:outline-none";
 
 function Field({
   label,
