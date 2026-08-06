@@ -31,6 +31,9 @@
 - **接入引导空态**:无 agent 时中栏直接渲染 `ConnectPanel`,视觉可再打磨;有 agent 后引导缩为右栏 tab。
 - **移除成员的错误反馈**:`useRemoveMember` 失败时仅有后端 message,无 toast。
 - **404/503 全局业务提示**(规格 §10 建议):目前只做了 401 会话失效。
+- **房间删除/管理**:需求已确认,但 `DELETE /v1/rooms/{roomId}` 尚未在
+  `shared/contracts` 与后端实现;前端无法独立完成,待协议+后端支持后再接入
+  (仅 owner 可删,硬删除房间及消息)。
 
 ## 明确不做(规格 §14,MVP 范围外)
 
@@ -40,10 +43,13 @@
 
 ```powershell
 cd frontend
-npm run dev        # http://localhost:3000(需后端 8787 已启动)
+npm run dev        # http://localhost:4000(需后端 8787 已启动)
 npm test           # Vitest
 npm run build      # 生产构建
 ```
 
 - 本地联调:`.env` → `VITE_API_BASE_URL=http://127.0.0.1:8787`(已被 git 忽略)。
+- 前端 dev 端口为 4000;后端 CORS 需允许该 origin(本地用环境变量
+  `CORS_ORIGIN=http://localhost:4000` 启动;注意当前后端不读取 `.env` 文件,
+  需显式传入进程环境变量)。
 - 后端内存模式即可演示;重启后数据清空。
