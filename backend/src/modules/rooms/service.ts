@@ -68,6 +68,7 @@ export type SendMessageInput =
       text: string;
       targetMemberIds: string[];
       idempotencyKey: string;
+      attachmentIds?: string[];
     };
 
 export interface SendMessageResult {
@@ -337,7 +338,7 @@ export class RoomService {
       text: input.text,
       targetMemberIds: [],
       idempotencyKey: null,
-      attachmentIds: input.attachmentIds ?? [],
+      attachmentIds: this.#normalizeAttachmentIds(input.attachmentIds ?? []),
       moderation: await this.#moderationOutcome(input.roomId, input.text),
     });
     this.publishMessage(message);
@@ -780,9 +781,14 @@ export class RoomService {
     deliveryId: string;
     accessToken: string;
     text: string;
+    attachmentIds?: string[];
     relay?: { targetMemberIds: string[]; idempotencyKey: string };
   }): Promise<ReplyResult> {
     const member = await this.authenticate(input.roomId, input.accessToken);
+    const attachmentIds = this.#normalizeAttachmentIds(
+      input.attachmentIds ?? [],
+    );
+    await this.#validateAttachments(input.roomId, attachmentIds);
     const { delivery, message } = await this.repository.replyToDelivery({
       roomId: input.roomId,
       deliveryId: input.deliveryId,
@@ -794,7 +800,7 @@ export class RoomService {
         text: input.text,
         targetMemberIds: [],
         idempotencyKey: null,
-        attachmentIds: [],
+        attachmentIds,
         moderation: await this.#moderationOutcome(input.roomId, input.text),
       }),
       updatedAt: this.now().toISOString(),
@@ -813,6 +819,7 @@ export class RoomService {
           text: message.text,
           targetMemberIds: input.relay.targetMemberIds,
           idempotencyKey: input.relay.idempotencyKey,
+          attachmentIds,
         },
         member,
       );
@@ -866,6 +873,9 @@ export class RoomService {
     member: RoomMember,
   ): Promise<SendMessageResult> {
     const targetMemberIds = [...new Set(input.targetMemberIds)].sort();
+    const attachmentIds = this.#normalizeAttachmentIds(
+      input.attachmentIds ?? [],
+    );
     if (targetMemberIds.length === 0 || targetMemberIds.length > 10) {
       throw new AppError(
         400,
@@ -893,6 +903,8 @@ export class RoomService {
       );
     }
 
+    await this.#validateAttachments(input.roomId, attachmentIds);
+
     const result = await this.repository.createAgentTask({
       message: this.buildMessageRecord({
         roomId: input.roomId,
@@ -901,7 +913,7 @@ export class RoomService {
         text: input.text,
         targetMemberIds,
         idempotencyKey: input.idempotencyKey,
-        attachmentIds: [],
+        attachmentIds,
         moderation: await this.#moderationOutcome(input.roomId, input.text),
       }),
       targetMemberIds,
@@ -1028,6 +1040,18 @@ export class RoomService {
         "One or more attachments do not exist in this room",
       );
     }
+  }
+
+  #normalizeAttachmentIds(attachmentIds: string[]): string[] {
+    const unique = [...new Set(attachmentIds)];
+    if (unique.length > 10) {
+      throw new AppError(
+        400,
+        "TOO_MANY_ATTACHMENTS",
+        "Messages can reference at most 10 attachments",
+      );
+    }
+    return unique;
   }
 
   private publishMessage(message: RoomMessage): void {

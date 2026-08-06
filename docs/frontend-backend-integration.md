@@ -550,7 +550,8 @@ Content-Type: application/json
   "kind": "agent.task",
   "text": "扫描项目并给出建议",
   "targetMemberIds": ["mem_codex_xxx", "mem_claude_xxx"],
-  "idempotencyKey": "task_550e8400-e29b-41d4-a716-446655440000"
+  "idempotencyKey": "task_550e8400-e29b-41d4-a716-446655440000",
+  "attachmentIds": ["att_xxx"]
 }
 ```
 
@@ -562,6 +563,8 @@ Content-Type: application/json
 - 前端第一次点击时生成一个稳定的幂等键；网络重试必须复用同一个键。
 - 首次创建返回 `201`；相同请求重放返回 `200` 和原任务。
 - 同一个幂等键换了正文或目标，返回 `409 IDEMPOTENCY_KEY_REUSED`。
+- 同一个幂等键换了附件引用也返回 `409 IDEMPOTENCY_KEY_REUSED`。
+- 任务可携带最多 10 个已完成、未标记的附件；目标 AI 收到的是附件 ID，不会自动下载。
 - 每个目标产生一个 delivery，状态为
   `queued -> received -> running -> replied | failed`。
 
@@ -630,13 +633,20 @@ CLI 和终端排障使用。
    提交了 SHA-256，还要按对象存储签名要求携带对应 checksum。对象存储必须允许前端
    Origin、`PUT` 和所需请求头。
 3. `POST /v1/rooms/{roomId}/files/{fileId}/complete`。只有上传者可以完成；成功后把
-   返回的 `attachment.id` 放进普通 `text` 消息的 `attachmentIds`。
+   返回的 `attachment.id` 放进 `text` 或 `agent.task` 消息的 `attachmentIds`。
 
-消息列表只返回附件 ID。渲染附件时可先用
-`GET /v1/rooms/{roomId}/attachments` 建立元数据索引，点击下载时再调用
-`GET /v1/rooms/{roomId}/attachments/{attachmentId}` 获取短期下载 URL；不要持久化
-签名 URL。`pending` 不允许发送，`flagged` 不允许下载，单文件和房间配额错误为
-`413 FILE_TOO_LARGE` / `ROOM_FILE_QUOTA_EXCEEDED`。当前 `agent.task` 不能携带附件。
+消息历史和 WebSocket 消息只返回附件 ID，不包含附件元数据、签名 URL 或二进制。
+进入房间、翻页历史时不要调用房间级 `GET /attachments` 拉取全部附件。只为当前可见
+消息里的某个 `attachmentId` 调用
+`GET /v1/rooms/{roomId}/attachments/{attachmentId}`；图片进入视口或用户点击文件时，
+再使用这次响应里的短期 `downloadUrl` 获取字节。可按 attachment ID 缓存稳定元数据，
+但不要持久化或长期缓存签名 URL。房间级 `/attachments` 仅用于显式的附件管理页。
+
+`agent.reply` 也可携带最多 10 个附件。Bridge 的 reply 请求接受 `attachmentIds`；如果
+同时带 `relay`，新建的下游 `agent.task` 会继承这些引用。AI 端同样默认只看到 ID，
+只有任务确实需要读取某张图片/某个文件时才会单独下载到私有工作区目录。
+`pending` 不允许发送，`flagged` 不允许下载，单文件和房间配额错误为
+`413 FILE_TOO_LARGE` / `ROOM_FILE_QUOTA_EXCEEDED`。
 
 ### 房间审核规则
 

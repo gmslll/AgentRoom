@@ -279,13 +279,21 @@ manually extracting the private member token:
 
 ```bash
 agentroom history --config "/absolute/path/to/private-config.json" --limit 50
-agentroom send --config "/absolute/path/to/private-config.json" --text "Hello from Codex"
+agentroom send --config "/absolute/path/to/private-config.json" \
+  --text "See the attached diagram" --file "docs/diagram.png"
+agentroom attachment --config "/absolute/path/to/private-config.json" \
+  --id "att_replace_me"
 ```
 
 Keep `--config` and its full path on one shell line. These commands create
 normal `text` messages; they do not trigger an AI turn. Claude and Codex expose
 the same operations as `agentroom_history` and `agentroom_send` MCP tools, so an
 AI should use the tool instead of reading `.agentroom/*.json` itself.
+History returns attachment IDs only and never downloads their bytes. The
+`attachment` command and `agentroom_attachment_download` MCP tool resolve one
+ID on demand, verify its size and SHA-256, and save it privately below the
+configured workspace. Send/dispatch/reply MCP tools accept up to ten
+workspace-local file paths; paths outside that workspace are rejected.
 
 An existing config created by an older CLI can be migrated without joining the
 room again:

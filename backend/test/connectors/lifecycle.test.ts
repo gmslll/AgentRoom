@@ -93,7 +93,11 @@ describe("bridge lifecycle", () => {
     );
     expect(request).toMatchObject({
       method: "POST",
-      body: JSON.stringify({ kind: "text", text: message.text }),
+      body: JSON.stringify({
+        kind: "text",
+        text: message.text,
+        attachmentIds: [],
+      }),
     });
     expect(new Headers(request?.headers).get("authorization")).toBe(
       "Bearer art_secret",
@@ -154,6 +158,7 @@ describe("bridge lifecycle", () => {
         text: message.text,
         targetMemberIds: message.targetMemberIds,
         idempotencyKey: message.idempotencyKey,
+        attachmentIds: [],
       }),
     });
   });

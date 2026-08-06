@@ -6,7 +6,15 @@ import {
   resolveKeychainToken,
   type StoredBridgeConfig,
 } from "../bridge-config.js";
-import { AgentRoomClient } from "../agentroom-client.js";
+import {
+  AgentRoomClient,
+  type AgentRoomAttachment,
+} from "../agentroom-client.js";
+import {
+  downloadAttachmentToWorkspace,
+  uploadWorkspaceFiles,
+  type LocalAttachment,
+} from "../attachment-files.js";
 import type { CommandInvocation } from "../session-attach.js";
 import {
   readReceiverRuntimeStatus,
@@ -166,9 +174,18 @@ export class CodexMcpSupervisor {
     roomId: string;
     memberId: string;
     text: string;
+    filePaths?: string[];
   }): Promise<RoomMessage> {
-    const client = await this.#clientFor(input.roomId, input.memberId);
-    return client.sendTextMessage(input.text);
+    const connection = await this.#connectionFor(input.roomId, input.memberId);
+    const attachments = await uploadWorkspaceFiles(
+      connection.client,
+      connection.workspace,
+      input.filePaths ?? [],
+    );
+    return connection.client.sendTextMessage(
+      input.text,
+      attachments.map((attachment) => attachment.id),
+    );
   }
 
   async sendAgentTask(input: {
@@ -177,12 +194,42 @@ export class CodexMcpSupervisor {
     text: string;
     targetMemberIds: string[];
     idempotencyKey: string;
+    filePaths?: string[];
   }): Promise<{ message: RoomMessage; deliveries: AgentDelivery[] }> {
-    const client = await this.#clientFor(input.roomId, input.memberId);
-    return client.sendAgentTask(
+    const connection = await this.#connectionFor(input.roomId, input.memberId);
+    const attachments = await uploadWorkspaceFiles(
+      connection.client,
+      connection.workspace,
+      input.filePaths ?? [],
+    );
+    return connection.client.sendAgentTask(
       input.text,
       input.targetMemberIds,
       input.idempotencyKey,
+      attachments.map((attachment) => attachment.id),
+    );
+  }
+
+  async getAttachment(input: {
+    roomId: string;
+    memberId: string;
+    attachmentId: string;
+  }): Promise<{ attachment: AgentRoomAttachment; downloadUrl: string }> {
+    const client = await this.#clientFor(input.roomId, input.memberId);
+    return client.getAttachment(input.attachmentId);
+  }
+
+  async downloadAttachment(input: {
+    roomId: string;
+    memberId: string;
+    attachmentId: string;
+  }): Promise<LocalAttachment> {
+    const connection = await this.#connectionFor(input.roomId, input.memberId);
+    return downloadAttachmentToWorkspace(
+      connection.client,
+      connection.workspace,
+      input.roomId,
+      input.attachmentId,
     );
   }
 
@@ -264,6 +311,13 @@ export class CodexMcpSupervisor {
     roomId: string,
     memberId: string,
   ): Promise<AgentRoomClient> {
+    return (await this.#connectionFor(roomId, memberId)).client;
+  }
+
+  async #connectionFor(
+    roomId: string,
+    memberId: string,
+  ): Promise<{ client: AgentRoomClient; workspace: string }> {
     await this.scan();
     const matches = [...this.#receivers.values()].filter(
       (receiver) =>
@@ -285,14 +339,17 @@ export class CodexMcpSupervisor {
       config.credentialStore === "keychain"
         ? await resolveKeychainToken(config)
         : config.accessToken;
-    return new AgentRoomClient({
-      baseUrl: config.baseUrl,
-      roomId: config.roomId,
-      accessToken,
-      httpTimeoutMs: 15_000,
-      socketConnectTimeoutMs: 15_000,
-      recoveryIntervalMs: 15_000,
-    });
+    return {
+      client: new AgentRoomClient({
+        baseUrl: config.baseUrl,
+        roomId: config.roomId,
+        accessToken,
+        httpTimeoutMs: 15_000,
+        socketConnectTimeoutMs: 15_000,
+        recoveryIntervalMs: 15_000,
+      }),
+      workspace: config.workspace,
+    };
   }
 
   #launch(discovered: DiscoveredCodexBridgeConfig): void {

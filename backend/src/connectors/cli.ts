@@ -53,6 +53,10 @@ import {
 import { updateInstalledCli } from "./self-update.js";
 import { receiverStatusPath } from "./receiver-status.js";
 import { AgentRoomClient } from "./agentroom-client.js";
+import {
+  downloadAttachmentToWorkspace,
+  uploadWorkspaceFiles,
+} from "./attachment-files.js";
 import { resolveProviderExecutable } from "./provider-executable.js";
 
 declare const __AGENTROOM_CLI_VERSION__: string;
@@ -61,7 +65,7 @@ declare const __AGENTROOM_CLI_DOWNLOAD_BASE__: string;
 const cliVersion =
   typeof __AGENTROOM_CLI_VERSION__ === "string"
     ? __AGENTROOM_CLI_VERSION__
-    : "0.5.0-dev";
+    : "0.6.0-dev";
 const cliDownloadBase =
   typeof __AGENTROOM_CLI_DOWNLOAD_BASE__ === "string"
     ? __AGENTROOM_CLI_DOWNLOAD_BASE__
@@ -86,6 +90,8 @@ try {
     await sendRoomMessage(args);
   } else if (command === "history") {
     await printRoomHistory(args);
+  } else if (command === "attachment") {
+    await downloadRoomAttachment(args);
   } else if (command === "dispatch") {
     await dispatchAgentTask(args);
   } else if (command === "claim-code") {
@@ -389,9 +395,17 @@ async function sendRoomMessage(args: string[]): Promise<void> {
   if (text.length > 8_000) {
     throw new Error("--text must be at most 8000 characters");
   }
-  const { client } = await configuredClient(args);
-  const message = await client.sendTextMessage(text);
-  console.log(JSON.stringify({ message }, null, 2));
+  const { client, config } = await configuredClient(args);
+  const attachments = await uploadWorkspaceFiles(
+    client,
+    config.workspace,
+    options(args, "--file"),
+  );
+  const message = await client.sendTextMessage(
+    text,
+    attachments.map((attachment) => attachment.id),
+  );
+  console.log(JSON.stringify({ message, attachments }, null, 2));
 }
 
 async function printRoomHistory(args: string[]): Promise<void> {
@@ -400,6 +414,30 @@ async function printRoomHistory(args: string[]): Promise<void> {
   const { client } = await configuredClient(args);
   const history = await client.listMessages(afterSequence, limit);
   console.log(JSON.stringify(history, null, 2));
+}
+
+async function downloadRoomAttachment(args: string[]): Promise<void> {
+  const attachmentId = option(args, "--id");
+  if (!attachmentId) {
+    throw new Error("--id is required");
+  }
+  const { client, config } = await configuredClient(args);
+  const downloaded = await downloadAttachmentToWorkspace(
+    client,
+    config.workspace,
+    config.roomId,
+    attachmentId,
+  );
+  console.log(
+    JSON.stringify(
+      {
+        attachment: downloaded.attachment,
+        localPath: downloaded.path,
+      },
+      null,
+      2,
+    ),
+  );
 }
 
 async function dispatchAgentTask(args: string[]): Promise<void> {
@@ -424,13 +462,19 @@ async function dispatchAgentTask(args: string[]): Promise<void> {
   ) {
     throw new Error("--idempotency-key must be between 8 and 100 characters");
   }
-  const { client } = await configuredClient(args);
+  const { client, config } = await configuredClient(args);
+  const attachments = await uploadWorkspaceFiles(
+    client,
+    config.workspace,
+    options(args, "--file"),
+  );
   const result = await client.sendAgentTask(
     text,
     [...new Set(targets)],
     idempotencyKey,
+    attachments.map((attachment) => attachment.id),
   );
-  console.log(JSON.stringify(result, null, 2));
+  console.log(JSON.stringify({ ...result, attachments }, null, 2));
 }
 
 async function issueAgentClaimCode(args: string[]): Promise<void> {
@@ -1110,6 +1154,21 @@ function option(args: string[], name: string): string | undefined {
   return value;
 }
 
+function options(args: string[], name: string): string[] {
+  const values: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] !== name) {
+      continue;
+    }
+    const value = args[index + 1];
+    if (!value || value.startsWith("--")) {
+      throw new Error(`${name} requires a value`);
+    }
+    values.push(value);
+  }
+  return values;
+}
+
 function positional(args: string[], index: number): string | undefined {
   return args.filter((value, valueIndex) => {
     if (value.startsWith("--")) {
@@ -1215,10 +1274,12 @@ Usage:
                    [--credential-store file|keychain] [--no-launch]
                    [--manual-start]
   agentroom start --config PATH [--no-launch]
-  agentroom send --config PATH --text TEXT
+  agentroom send --config PATH --text TEXT [--file WORKSPACE_PATH ...]
   agentroom history --config PATH [--after-sequence N] [--limit 1..200]
+  agentroom attachment --config PATH --id ATTACHMENT_ID
   agentroom dispatch --config PATH --targets MEMBER_ID[,MEMBER_ID]
                      --idempotency-key KEY --text TEXT
+                     [--file WORKSPACE_PATH ...]
   agentroom claim-code --config PATH
   agentroom run --config PATH
   agentroom mcp [--workspace PATH]

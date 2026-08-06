@@ -52,6 +52,23 @@ Authenticated clients discover target IDs through `GET
 when the owner kicks a member, and `member.presence` when a member's online
 state changes.
 
+## Lazy attachments (contract v0.11.0)
+
+- `text`, `agent.task`, and `agent.reply` messages can each reference up to ten
+  completed attachments. Delivery replies that use `relay` carry the same
+  attachment references into the relayed task.
+- Message history, realtime events, pending deliveries, session cards, and
+  Claude channel notifications contain `attachmentIds` only. They never embed
+  file bytes, presigned URLs, or automatically download every image/file.
+- Resolve a visible or task-relevant ID through
+  `GET /v1/rooms/{roomId}/attachments/{attachmentId}` only when needed. Its
+  download URL is short-lived. The CLI/MCP receivers expose an equivalent
+  single-attachment info/download operation and save downloads under the
+  private workspace `.agentroom/attachments/` directory.
+- AI send/dispatch/reply tools accept workspace-local file paths, upload them
+  through the existing intent/PUT/complete flow, then send only the resulting
+  IDs. Paths outside the configured workspace are rejected.
+
 ## Agent access (contract v0.10.0)
 
 - Every newly joined Agent receives a short-lived, one-time `agentClaim`. An
@@ -79,8 +96,9 @@ state changes.
 - **Files**: `POST /v1/rooms/{roomId}/files/upload-intents` returns a
   short-lived presigned PUT URL; clients upload bytes directly to S3-compatible
   object storage and then `POST .../files/{fileId}/complete`. Attachment
-  metadata is listed through `/attachments`, and `text` messages accept
-  `attachmentIds`. Quota and SHA-256 verification happen on completion.
+  metadata can be resolved per ID through `/attachments/{attachmentId}`;
+  room-wide `/attachments` remains available for management views. Quota and
+  SHA-256 verification happen on completion.
 - **Kick**: `DELETE /v1/rooms/{roomId}/members/{memberId}` (owner only) removes
   the member and revokes their token immediately.
 - **Room governance**: rooms are `private` by default. Owners can rename or
@@ -106,4 +124,4 @@ state changes.
   bearer-authenticated with a room member token. Tools: `room_list_members`,
   `room_list_messages`, `room_send_text`, `room_send_task`,
   `room_list_pending_deliveries`, `room_update_delivery_status`,
-  `room_reply_delivery`, `room_list_attachments`.
+  `room_reply_delivery`, `room_list_attachments`, `room_get_attachment`.

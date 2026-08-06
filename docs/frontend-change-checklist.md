@@ -43,6 +43,12 @@
   `DELETE /v1/rooms/{roomId}/members/{memberId}`，不要提供移除 owner 的操作。
 - 保持对 `message.created` 和 `delivery.updated` 的 ID 去重；agent 的显式 relay 会表现
   为新的任务消息和 delivery，前端不要解析回复正文来自动触发 AI。
+- 附件改成严格按需加载：历史消息只使用 `attachmentIds`，进入房间或翻页时不要调用
+  房间级 `GET /attachments`。仅为可见附件调用
+  `GET /attachments/{attachmentId}`；图片进入视口或用户点击文件时才请求其短期
+  `downloadUrl`。稳定元数据可按 ID 缓存，签名 URL 不持久化。
+- `agent.task` 现在可携带最多 10 个 `attachmentIds`。上传仍为 intent -> PUT ->
+  complete；完成后可把同一组 ID 放进普通消息或显式 @Agent 任务。
 
 ## session-card 对前端的影响
 
@@ -52,8 +58,8 @@ session-card 是目标电脑 `.agentroom/` 下的本地可靠性证据。它没�
 
 ## 可以继续接入
 
-- 附件：upload intent -> 对象存储 PUT -> complete -> 普通文字消息携带
-  `attachmentIds`。下载前重新获取短期签名 URL，不持久化该 URL。
+- 附件管理页可显式调用房间级 `GET /attachments`；普通聊天室历史不得用它预加载
+  所有图片和文件。
 - 账号：邮箱验证、忘记密码、修改密码，以及按部署开关显示 Google/GitHub OAuth。
 - owner 审核规则：`flag` 结果可在消息上显示，`reject` 发送失败按业务错误展示。
 - AgentRoom CLI 面板继续直接使用接口返回的 `connector.command`、

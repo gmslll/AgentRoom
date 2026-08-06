@@ -1,4 +1,5 @@
 import WebSocket from "ws";
+import { createHash } from "node:crypto";
 import type {
   AgentClaim,
   AgentDelivery,
@@ -25,6 +26,23 @@ export type AgentRoomConnectionState =
 export interface AgentRoomConnectionUpdate {
   state: AgentRoomConnectionState;
   error?: unknown;
+}
+
+export interface AgentRoomAttachment {
+  id: string;
+  roomId: string;
+  uploaderMemberId: string;
+  name: string;
+  mediaType: string;
+  size: number;
+  sha256: string;
+  scanState: "pending" | "clean" | "flagged";
+  createdAt: string;
+}
+
+export interface DownloadedAttachment {
+  attachment: AgentRoomAttachment;
+  bytes: Uint8Array;
 }
 
 class AgentRoomApiError extends Error {
@@ -61,12 +79,15 @@ export class AgentRoomClient {
     );
   }
 
-  async sendTextMessage(text: string): Promise<RoomMessage> {
+  async sendTextMessage(
+    text: string,
+    attachmentIds: string[] = [],
+  ): Promise<RoomMessage> {
     const body = await this.request<{ message: RoomMessage }>(
       `/v1/rooms/${encodeURIComponent(this.config.roomId)}/messages`,
       {
         method: "POST",
-        body: JSON.stringify({ kind: "text", text }),
+        body: JSON.stringify({ kind: "text", text, attachmentIds }),
       },
     );
     return body.message;
@@ -76,6 +97,7 @@ export class AgentRoomClient {
     text: string,
     targetMemberIds: string[],
     idempotencyKey: string,
+    attachmentIds: string[] = [],
   ): Promise<{ message: RoomMessage; deliveries: AgentDelivery[] }> {
     return this.request(
       `/v1/rooms/${encodeURIComponent(this.config.roomId)}/messages`,
@@ -86,6 +108,7 @@ export class AgentRoomClient {
           text,
           targetMemberIds,
           idempotencyKey,
+          attachmentIds,
         }),
       },
     );
@@ -119,11 +142,116 @@ export class AgentRoomClient {
   async replyToDelivery(
     deliveryId: string,
     text: string,
+    attachmentIds: string[] = [],
   ): Promise<{ delivery: AgentDelivery; message: RoomMessage }> {
     return this.request(
       `/v1/rooms/${encodeURIComponent(this.config.roomId)}/deliveries/${encodeURIComponent(deliveryId)}/reply`,
-      { method: "POST", body: JSON.stringify({ text }) },
+      {
+        method: "POST",
+        body: JSON.stringify({ text, attachmentIds }),
+      },
     );
+  }
+
+  async listAttachments(): Promise<AgentRoomAttachment[]> {
+    const body = await this.request<{ items: AgentRoomAttachment[] }>(
+      `/v1/rooms/${encodeURIComponent(this.config.roomId)}/attachments`,
+    );
+    return body.items;
+  }
+
+  async getAttachment(
+    attachmentId: string,
+  ): Promise<{ attachment: AgentRoomAttachment; downloadUrl: string }> {
+    return this.request(
+      `/v1/rooms/${encodeURIComponent(this.config.roomId)}/attachments/${encodeURIComponent(attachmentId)}`,
+    );
+  }
+
+  async uploadAttachment(input: {
+    name: string;
+    mediaType: string;
+    bytes: Uint8Array;
+  }): Promise<AgentRoomAttachment> {
+    const sha256 = createHash("sha256").update(input.bytes).digest("hex");
+    const intent = await this.request<{
+      fileId: string;
+      presignedUrl: string;
+      expiresAt: string;
+    }>(
+      `/v1/rooms/${encodeURIComponent(this.config.roomId)}/files/upload-intents`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          name: input.name,
+          mediaType: input.mediaType,
+          size: input.bytes.byteLength,
+          sha256,
+        }),
+      },
+    );
+    const uploadUrl = validatedTransferUrl(intent.presignedUrl, "upload");
+    const response = await fetch(uploadUrl, {
+      method: "PUT",
+      headers: {
+        "content-type": input.mediaType,
+        "content-length": String(input.bytes.byteLength),
+        "x-amz-checksum-sha256": Buffer.from(sha256, "hex").toString(
+          "base64",
+        ),
+      },
+      body: Buffer.from(input.bytes),
+      signal: AbortSignal.timeout(attachmentTransferTimeout(this.config)),
+    });
+    if (!response.ok) {
+      throw new Error(
+        `Attachment upload failed with HTTP ${response.status} ${response.statusText}`,
+      );
+    }
+    const completed = await this.request<{
+      attachment: AgentRoomAttachment;
+      downloadUrl: string;
+    }>(
+      `/v1/rooms/${encodeURIComponent(this.config.roomId)}/files/${encodeURIComponent(intent.fileId)}/complete`,
+      { method: "POST" },
+    );
+    return completed.attachment;
+  }
+
+  async downloadAttachment(
+    attachmentId: string,
+    maximumBytes = 104_857_600,
+  ): Promise<DownloadedAttachment> {
+    const result = await this.getAttachment(attachmentId);
+    if (result.attachment.size > maximumBytes) {
+      throw new Error(
+        `Attachment ${attachmentId} is ${result.attachment.size} bytes; the local limit is ${maximumBytes}`,
+      );
+    }
+    const downloadUrl = validatedTransferUrl(result.downloadUrl, "download");
+    const response = await fetch(downloadUrl, {
+      signal: AbortSignal.timeout(attachmentTransferTimeout(this.config)),
+    });
+    if (!response.ok) {
+      throw new Error(
+        `Attachment download failed with HTTP ${response.status} ${response.statusText}`,
+      );
+    }
+    const contentLength = response.headers.get("content-length");
+    if (contentLength && Number(contentLength) > maximumBytes) {
+      throw new Error(`Attachment ${attachmentId} exceeds the local size limit`);
+    }
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.byteLength !== result.attachment.size) {
+      throw new Error(`Attachment ${attachmentId} size verification failed`);
+    }
+    if (result.attachment.sha256) {
+      const actual = createHash("sha256").update(bytes).digest("hex");
+      if (actual !== result.attachment.sha256) {
+        throw new Error(`Attachment ${attachmentId} checksum verification failed`);
+      }
+    }
+    return { attachment: result.attachment, bytes };
   }
 
   async listen(
@@ -298,6 +426,18 @@ function isTerminalMembershipError(error: unknown): boolean {
       error.code === "INVALID_TOKEN" ||
       error.code === "AUTH_REQUIRED")
   );
+}
+
+function validatedTransferUrl(value: string, operation: string): URL {
+  const url = new URL(value);
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error(`Attachment ${operation} URL must use HTTP or HTTPS`);
+  }
+  return url;
+}
+
+function attachmentTransferTimeout(config: AgentRoomClientConfig): number {
+  return Math.max(config.httpTimeoutMs, 5 * 60_000);
 }
 
 async function waitForAbort(signal?: AbortSignal): Promise<void> {

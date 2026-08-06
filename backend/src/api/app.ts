@@ -166,7 +166,7 @@ export async function buildApp(
     storage,
     authenticateMember: (roomId, accessToken) =>
       roomService.authenticate(roomId, accessToken),
-    maxSizeBytes: options.files?.maxSizeBytes ?? 100,
+    maxSizeBytes: options.files?.maxSizeBytes ?? 104_857_600,
     roomQuotaBytes: options.files?.roomQuotaBytes ?? 1_048_576_000,
     scanResult: options.files?.scanResult ?? "clean",
     uploadUrlTtlSeconds: options.files?.uploadUrlTtlSeconds ?? 300,

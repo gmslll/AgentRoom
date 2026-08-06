@@ -510,7 +510,8 @@ export class InMemoryRoomRepository implements RoomRepository {
       }
       if (
         existing.text !== record.message.text ||
-        !sameStrings(existing.targetMemberIds, record.targetMemberIds)
+        !sameStrings(existing.targetMemberIds, record.targetMemberIds) ||
+        !sameStrings(existing.attachmentIds, record.message.attachmentIds)
       ) {
         throw new AppError(
           409,

@@ -104,6 +104,11 @@ const UpdateDeliveryBody = Type.Union([
 const ReplyDeliveryBody = Type.Object(
   {
     text: Type.String({ minLength: 1, maxLength: 8_000, pattern: "\\S" }),
+    attachmentIds: Type.Optional(
+      Type.Array(Type.String({ minLength: 8, maxLength: 80 }), {
+        maxItems: 10,
+      }),
+    ),
     relay: Type.Optional(
       Type.Object(
         {
@@ -529,16 +534,6 @@ export function registerRoomRoutes(
           "Text messages cannot target or trigger agents",
         );
       }
-      if (
-        request.body.kind === "agent.task" &&
-        request.body.attachmentIds
-      ) {
-        throw new AppError(
-          400,
-          "INVALID_AGENT_TASK",
-          "Agent tasks cannot carry file attachments",
-        );
-      }
       const result =
         request.body.kind === "agent.task"
           ? await roomService.sendMessage({
@@ -548,6 +543,7 @@ export function registerRoomRoutes(
               text: request.body.text,
               targetMemberIds: request.body.targetMemberIds!,
               idempotencyKey: request.body.idempotencyKey!,
+              attachmentIds: request.body.attachmentIds ?? [],
             })
           : await roomService.sendMessage({
               kind: "text",
@@ -604,6 +600,7 @@ export function registerRoomRoutes(
           deliveryId: request.params.deliveryId,
           accessToken: readBearerToken(request.headers.authorization),
           text: request.body.text,
+          attachmentIds: request.body.attachmentIds ?? [],
           ...(request.body.relay
             ? {
                 relay: {

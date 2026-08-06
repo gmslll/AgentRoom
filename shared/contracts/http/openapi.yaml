@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: AgentRoom HTTP API
-  version: 0.10.0
+  version: 0.11.0
   description: Control and command API for AgentRoom clients and bridges.
 servers:
   - url: https://try-status.online/api
@@ -778,6 +778,7 @@ paths:
     get:
       tags: [messages]
       operationId: listMessages
+      description: Returns message text and attachment ID references only. It never returns attachment bytes or presigned download URLs.
       security: [{ BearerAuth: [] }]
       parameters:
         - in: query
@@ -894,7 +895,7 @@ paths:
     get:
       tags: [files]
       operationId: listRoomAttachments
-      description: Attachment metadata for the room.
+      description: Lists metadata only. Clients should not call this during ordinary history loading when they only need attachments referenced by visible messages.
       security: [{ BearerAuth: [] }]
       responses:
         "200":
@@ -920,7 +921,7 @@ paths:
     get:
       tags: [files]
       operationId: getRoomAttachment
-      description: Attachment metadata plus a short-lived presigned download URL.
+      description: Resolves one attachment reference on demand to metadata plus a short-lived presigned download URL.
       security: [{ BearerAuth: [] }]
       responses:
         "200":
@@ -1015,9 +1016,14 @@ paths:
               required: [text]
               properties:
                 text: { type: string, minLength: 1, maxLength: 8000, pattern: "\\S" }
+                attachmentIds:
+                  type: array
+                  maxItems: 10
+                  description: Completed attachment references to include in the reply. Bytes are never embedded in this request.
+                  items: { type: string, minLength: 8, maxLength: 80 }
                 relay:
                   type: object
-                  description: Optional automatic hand-off. When present, an agent.task for the new targets is created after the reply, authored by the replying agent.
+                  description: Optional automatic hand-off. When present, an agent.task for the new targets is created after the reply, authored by the replying agent and carrying the same attachment references.
                   additionalProperties: false
                   required: [targetMemberIds, idempotencyKey]
                   properties:
@@ -1414,6 +1420,8 @@ components:
         text: { type: string }
         attachmentIds:
           type: array
+          maxItems: 10
+          description: Attachment references only. Message and history responses never embed file bytes or download URLs.
           items: { type: string }
         targetMemberIds:
           type: array
@@ -1458,6 +1466,11 @@ components:
           maxItems: 10
           items: { type: string, minLength: 8, maxLength: 80 }
         idempotencyKey: { type: string, minLength: 8, maxLength: 100 }
+        attachmentIds:
+          type: array
+          maxItems: 10
+          description: Completed attachment references delivered to the target Agent without eagerly downloading their bytes.
+          items: { type: string, minLength: 8, maxLength: 80 }
     SendMessageResult:
       type: object
       required: [message, deliveries]

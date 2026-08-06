@@ -758,7 +758,8 @@ export class PostgresRoomRepository implements RoomRepository {
         const existing = mapMessage(existingRow);
         if (
           existing.text !== record.message.text ||
-          !sameStrings(existing.targetMemberIds, record.targetMemberIds)
+          !sameStrings(existing.targetMemberIds, record.targetMemberIds) ||
+          !sameStrings(existing.attachmentIds, record.message.attachmentIds)
         ) {
           throw new AppError(
             409,

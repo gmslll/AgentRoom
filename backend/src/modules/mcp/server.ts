@@ -65,7 +65,7 @@ export function registerMcpRoutes(
       // cross-request state to leak.
       const server = new McpServer({
         name: "agentroom",
-        version: "0.1.0",
+        version: "0.2.0",
       });
       registerRoomTools(server, roomService);
       if (fileService) {
@@ -129,7 +129,7 @@ function registerRoomTools(
     "room_list_messages",
     {
       description:
-        "Lists room messages ordered by ascending room sequence. Provide afterSequence to page forward.",
+        "Lists room messages and attachment ID references, never file bytes or download URLs. Provide afterSequence to page forward.",
       inputSchema: {
         roomId,
         afterSequence: z.number().int().min(0).optional(),
@@ -150,10 +150,15 @@ function registerRoomTools(
   server.registerTool(
     "room_send_text",
     {
-      description: "Posts a plain text message to the room.",
+      description:
+        "Posts a text message with optional existing attachment IDs. File bytes are not loaded by message history.",
       inputSchema: {
         roomId,
         text: z.string().min(1).max(8_000),
+        attachmentIds: z
+          .array(z.string().min(8).max(80))
+          .max(10)
+          .optional(),
       },
     },
     async (input) =>
@@ -163,6 +168,7 @@ function registerRoomTools(
           roomId: input.roomId,
           accessToken: requireToken(),
           text: input.text,
+          attachmentIds: input.attachmentIds ?? [],
         }),
       ),
   );
@@ -177,6 +183,10 @@ function registerRoomTools(
         text: z.string().min(1).max(8_000),
         targetMemberIds: z.array(z.string().min(8).max(80)).min(1).max(10),
         idempotencyKey: z.string().min(8).max(100),
+        attachmentIds: z
+          .array(z.string().min(8).max(80))
+          .max(10)
+          .optional(),
       },
     },
     async (input) =>
@@ -188,6 +198,7 @@ function registerRoomTools(
           text: input.text,
           targetMemberIds: input.targetMemberIds,
           idempotencyKey: input.idempotencyKey,
+          attachmentIds: input.attachmentIds ?? [],
         }),
       ),
   );
@@ -241,6 +252,10 @@ function registerRoomTools(
         roomId,
         deliveryId: z.string().min(8).max(80),
         text: z.string().min(1).max(8_000),
+        attachmentIds: z
+          .array(z.string().min(8).max(80))
+          .max(10)
+          .optional(),
         relay: z
           .object({
             targetMemberIds: z.array(z.string().min(8).max(80)).min(1).max(10),
@@ -256,6 +271,7 @@ function registerRoomTools(
           deliveryId: input.deliveryId,
           accessToken: requireToken(),
           text: input.text,
+          attachmentIds: input.attachmentIds ?? [],
           ...(input.relay ? { relay: input.relay } : {}),
         }),
       ),
@@ -271,13 +287,34 @@ function registerFileTools(
   server.registerTool(
     "room_list_attachments",
     {
-      description: "Lists attachment metadata for a room.",
+      description:
+        "Lists attachment metadata only; it never downloads file bytes.",
       inputSchema: { roomId },
     },
     async ({ roomId: targetRoomId }) =>
       runTool(() =>
         fileService.listAttachments({
           roomId: targetRoomId,
+          accessToken: requireToken(),
+        }),
+      ),
+  );
+
+  server.registerTool(
+    "room_get_attachment",
+    {
+      description:
+        "Gets metadata and a short-lived download URL for one attachment on demand.",
+      inputSchema: {
+        roomId,
+        attachmentId: z.string().min(8).max(80),
+      },
+    },
+    async (input) =>
+      runTool(() =>
+        fileService.getAttachment({
+          roomId: input.roomId,
+          attachmentId: input.attachmentId,
           accessToken: requireToken(),
         }),
       ),

@@ -5,11 +5,17 @@ import { InMemoryEventBus } from "../../../src/modules/realtime/event-bus.js";
 import { InMemoryRoomRepository } from "../../../src/modules/rooms/memory-repository.js";
 import { RoomService } from "../../../src/modules/rooms/service.js";
 
-async function setupRoom() {
+async function setupRoom(
+  validateAttachments?: (roomId: string, attachmentIds: string[]) => Promise<boolean>,
+) {
   const repository = new InMemoryRoomRepository();
   const service = new RoomService(
     repository,
     new InMemoryEventBus(),
+    undefined,
+    undefined,
+    undefined,
+    { ...(validateAttachments ? { validateAttachments } : {}) },
   );
   const owner = await service.createRoom({
     name: "Concurrency room",
@@ -111,6 +117,71 @@ describe("RoomService concurrency", () => {
       statusCode: 409,
       code: "IDEMPOTENCY_KEY_REUSED",
     } satisfies Partial<AppError>);
+  });
+
+  it("delivers attachment references to an Agent and accepts them on its reply", async () => {
+    const { service, owner, agent } = await setupRoom(async () => true);
+    const taskAttachmentId = "att_task_12345678";
+    const replyAttachmentId = "att_reply_12345678";
+    const task = await service.sendMessage({
+      kind: "agent.task",
+      roomId: owner.room.id,
+      accessToken: owner.accessToken,
+      text: "Review the attached image",
+      targetMemberIds: [agent.member.id],
+      idempotencyKey: "attachment-task-0001",
+      attachmentIds: [taskAttachmentId],
+    });
+    const pending = await service.listPendingDeliveries({
+      roomId: owner.room.id,
+      accessToken: agent.accessToken,
+    });
+
+    expect(task.message.attachmentIds).toEqual([taskAttachmentId]);
+    expect(pending[0]?.task.attachmentIds).toEqual([taskAttachmentId]);
+
+    await service.updateDeliveryStatus({
+      roomId: owner.room.id,
+      deliveryId: task.deliveries[0]!.id,
+      accessToken: agent.accessToken,
+      status: "running",
+      error: null,
+    });
+
+    const reply = await service.replyToDelivery({
+      roomId: owner.room.id,
+      deliveryId: task.deliveries[0]!.id,
+      accessToken: agent.accessToken,
+      text: "Reviewed the image",
+      attachmentIds: [replyAttachmentId],
+    });
+    expect(reply.message.attachmentIds).toEqual([replyAttachmentId]);
+  });
+
+  it("treats attachment references as part of task idempotency", async () => {
+    const { service, owner, agent } = await setupRoom(async () => true);
+    const common = {
+      kind: "agent.task" as const,
+      roomId: owner.room.id,
+      accessToken: owner.accessToken,
+      text: "Review attachment",
+      targetMemberIds: [agent.member.id],
+      idempotencyKey: "attachment-conflict-0001",
+    };
+    await service.sendMessage({
+      ...common,
+      attachmentIds: ["att_first_12345678"],
+    });
+
+    await expect(
+      service.sendMessage({
+        ...common,
+        attachmentIds: ["att_second_12345678"],
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      code: "IDEMPOTENCY_KEY_REUSED",
+    });
   });
 
   it("commits at most one reply under concurrent delivery replies", async () => {
