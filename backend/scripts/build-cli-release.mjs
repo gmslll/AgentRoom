@@ -35,6 +35,12 @@ await build({
   platform: "node",
   format: "esm",
   target: "node22",
+  // @napi-rs/keyring is an optional native enhancement. A single portable
+  // JavaScript release cannot embed every OS/architecture .node binary, and
+  // the connector already falls back to its mode-0600 config when this import
+  // is unavailable. Keep the dynamic import intact instead of making esbuild
+  // consume the build host's native binary.
+  external: ["@napi-rs/keyring"],
   legalComments: "none",
   sourcemap: false,
   minify: false,
