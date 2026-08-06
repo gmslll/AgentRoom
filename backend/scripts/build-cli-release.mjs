@@ -9,12 +9,23 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, parse, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 
 const backendRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const outputDirectory = resolve(backendRoot, "artifacts", "cli");
+const outputDirectory = resolve(
+  process.env.AGENTROOM_CLI_OUTPUT_DIR ??
+    resolve(backendRoot, "artifacts", "cli"),
+);
+if (
+  basename(outputDirectory) !== "cli" ||
+  outputDirectory === parse(outputDirectory).root ||
+  outputDirectory === backendRoot ||
+  outputDirectory === dirname(backendRoot)
+) {
+  throw new Error("AgentRoom CLI output directory must be a dedicated cli directory");
+}
 const packageJson = JSON.parse(
   await readFile(resolve(backendRoot, "package.json"), "utf8"),
 );
@@ -35,6 +46,13 @@ await build({
   platform: "node",
   format: "esm",
   target: "node22",
+  // The CLI is ESM, while ws and some of its transitive dependencies are
+  // CommonJS and dynamically require Node built-ins such as events/stream.
+  // Give esbuild's CommonJS compatibility helper a real Node require instead
+  // of its browser-style "dynamic require is not supported" fallback.
+  banner: {
+    js: 'import { createRequire as __agentroomCreateRequire } from "node:module";\nconst require = __agentroomCreateRequire(import.meta.url);',
+  },
   // @napi-rs/keyring is an optional native enhancement. A single portable
   // JavaScript release cannot embed every OS/architecture .node binary, and
   // the connector already falls back to its mode-0600 config when this import
