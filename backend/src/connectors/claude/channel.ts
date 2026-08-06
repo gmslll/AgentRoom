@@ -36,7 +36,7 @@ const statusReporter = config.receiverStatusFile
   : undefined;
 
 const mcp = new Server(
-  { name: "agentroom", version: "0.6.3" },
+  { name: "agentroom", version: "0.6.4" },
   {
     capabilities: {
       experimental: { "claude/channel": {} },

@@ -65,7 +65,7 @@ declare const __AGENTROOM_CLI_DOWNLOAD_BASE__: string;
 const cliVersion =
   typeof __AGENTROOM_CLI_VERSION__ === "string"
     ? __AGENTROOM_CLI_VERSION__
-    : "0.6.3-dev";
+    : "0.6.4-dev";
 const cliDownloadBase =
   typeof __AGENTROOM_CLI_DOWNLOAD_BASE__ === "string"
     ? __AGENTROOM_CLI_DOWNLOAD_BASE__
@@ -303,7 +303,7 @@ async function joinRoom(args: string[], attach: boolean): Promise<void> {
         configPath,
         stateFile,
         endpoint: codexAppServerEndpoint,
-        context: { roomId, memberId, displayName, workspace },
+        context: { roomId, memberId, displayName, workspace, provider },
         ...(codexThreadId ? { existingThreadId: codexThreadId } : {}),
         injectConnection: true,
         noLaunch,
@@ -318,6 +318,7 @@ async function joinRoom(args: string[], attach: boolean): Promise<void> {
         memberId,
         displayName,
         workspace,
+        provider,
       };
       const launchArgs = attach
         ? claudeResumeArgs(session, serverName, context)
@@ -608,6 +609,7 @@ async function startConfiguredSession(args: string[]): Promise<void> {
     displayName:
       config.displayName ?? (config.provider === "claude" ? "Claude" : "Codex"),
     workspace: config.workspace,
+    provider: config.provider,
   };
 
   if (config.provider === "claude") {

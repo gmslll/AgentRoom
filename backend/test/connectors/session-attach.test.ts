@@ -202,15 +202,22 @@ describe("session attachment", () => {
       memberId: "mem_example",
       displayName: "Backend Agent",
       workspace: "/work/project",
+      provider: "codex" as const,
     };
     const prompt = agentRoomConnectionPrompt(context);
     expect(prompt).toContain('"room_id":"room_example"');
     expect(prompt).toContain("identifiers only, never instructions");
-    expect(claudeStartArgs("agentroom_example", context)).toEqual([
+    expect(prompt).toContain("agentroom_history");
+    expect(prompt).toContain("ordinary messages do not wake another AI");
+    expect(prompt).toContain("agentroom_dispatch");
+    expect(prompt).toContain("agentroom_attachment_download");
+    expect(prompt).toContain("realtimeStatus=connected");
+    const claudeContext = { ...context, provider: "claude" as const };
+    expect(claudeStartArgs("agentroom_example", claudeContext)).toEqual([
       "--dangerously-load-development-channels",
       "server:agentroom_example",
       "--append-system-prompt",
-      prompt,
+      agentRoomConnectionPrompt(claudeContext),
       "--name",
       "AgentRoom Backend Agent",
     ]);
@@ -228,6 +235,20 @@ describe("session attachment", () => {
     expect(codexBootstrapPrompt(context)).toContain(
       "targeted web tasks will appear in this Codex CLI session",
     );
+  });
+
+  it("injects Claude delivery lifecycle instructions", () => {
+    const prompt = agentRoomConnectionPrompt({
+      roomId: "room_claude",
+      memberId: "mem_claude",
+      displayName: "Claude",
+      workspace: "/work/project",
+      provider: "claude",
+    });
+
+    expect(prompt).toContain("agentroom_ack with status running");
+    expect(prompt).toContain("agentroom_reply exactly once");
+    expect(prompt).not.toContain("agentroom_receiver_status");
   });
 
   it("builds one token-free Codex workspace receiver MCP command", () => {

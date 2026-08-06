@@ -451,7 +451,9 @@ Authorization: Bearer ars_xxx
    `join`/`attach` 会自动配置 provider MCP、注入房间身份，并直接启动对应的 Claude
    Code 或 Codex CLI，不再要求用户复制第二条命令或常驻执行
    `agentroom run --config ...`。Codex 的 Bridge 和 Remote TUI 使用同一 App Server
-   thread，因此网页定向任务会出现在当前可见终端。
+   thread，因此网页定向任务会出现在当前可见终端。启动时还会注入聊天室用法：普通
+   消息的 history/send 不会唤醒 AI、定向 dispatch 需要明确请求和已批准协作、附件
+   按 ID 单个加载、禁止读取私有配置/token，以及 Claude/Codex 各自的任务回复方式。
 8. 加入成功页说明“完成询问后会自动启动对应 AI”；只配置不启动使用
    `--no-launch`，CLI 会输出 `agentroom start --config <PATH>` 供稍后进入。高级排障时
    才展示 `--manual-start` 与 `agentroom run`。

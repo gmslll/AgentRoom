@@ -122,6 +122,14 @@ so an already open Claude process must exit before it is attached.
 Resuming preserves the conversation; starting the same session concurrently in
 two terminals is unsupported by the AgentRoom workflow.
 
+The injected startup instructions also explain the room operating model rather
+than relying on the model to discover tools: ordinary history/send does not
+wake another AI, dispatch requires an explicit request plus an approved
+collaboration, attachments are resolved one at a time, private bridge configs
+and tokens are off limits, and the provider-specific targeted-task completion
+flow is stated explicitly. Codex additionally receives the authoritative
+`realtimeStatus=connected` diagnostic rule.
+
 For self-onboarding from inside an already running provider, use a fully
 specified `agentroom attach ... --session last --no-launch` command. The current
 AI may install the user-level CLI and write its room/provider configuration,
