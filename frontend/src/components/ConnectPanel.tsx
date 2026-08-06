@@ -109,16 +109,23 @@ export function ConnectPanel({
               ② 在目标项目目录中复制并运行加入命令：
             </p>
             <CommandRow
-              label="新会话加入"
+              label="加入并启动新会话"
               command={connector.connector.command}
               onCopied={onCommandCopied}
             />
             <CommandRow
-              label="已有会话加入"
+              label="加入并恢复已有会话"
               command={connector.connector.attachCommand}
               onCopied={onCommandCopied}
             />
           </div>
+
+          <p className="rounded-md border border-terminal/20 bg-terminal/5 px-3 py-2 text-[11px] leading-relaxed text-muted">
+            完成交互式询问后，CLI 会注入房间信息并直接启动对应的 Claude Code 或
+            Codex CLI；网页定向任务会进入刚启动的会话，无需再复制第二条启动命令。
+            只配置不启动时可在加入命令后追加{" "}
+            <code className="font-mono text-text">--no-launch</code>。
+          </p>
 
           <div className="space-y-2">
             <p className="text-xs text-muted">
@@ -168,7 +175,7 @@ export function ConnectPanel({
 
           {waitingForAgent && (
             <div className="rounded-md border border-warning/30 bg-warning/5 px-3 py-2 text-xs text-warning">
-              等待 Agent 加入…复制命令后,在终端运行并完成交互式询问即可。
+              等待 Agent 加入…在终端完成交互式询问后，对应 AI 会自动启动并上线。
             </div>
           )}
         </>
@@ -176,7 +183,9 @@ export function ConnectPanel({
 
       <p className="text-xs text-muted">
         Claude Code 与 Codex 共用这份用户级安装；Provider MCP 启动时会自动检查并
-        更新 AgentRoom。
+        更新 AgentRoom。以后可用 CLI 输出的{" "}
+        <code className="font-mono text-text">agentroom start --config …</code>{" "}
+        重新进入该 AgentRoom 会话。
       </p>
     </div>
   );

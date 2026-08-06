@@ -12,11 +12,14 @@ export interface AgentRoomClientConfig {
 export interface AgentRoomBridgeConfig extends AgentRoomClientConfig {
   workspace: string;
   sessionCardRoot: string;
+  memberId?: string;
+  displayName?: string;
 }
 
 export interface CodexBridgeConfig extends AgentRoomBridgeConfig {
   stateFile: string;
   codexCommand: string;
+  codexAppServerEndpoint?: string;
   codexRequestTimeoutMs: number;
   codexTurnTimeoutMs: number;
 }
@@ -28,6 +31,8 @@ export function loadAgentRoomBridgeConfig(
   const roomId = env.AGENTROOM_ROOM_ID;
   const accessToken = env.AGENTROOM_ACCESS_TOKEN;
   const workspace = resolve(env.AGENTROOM_WORKSPACE ?? process.cwd());
+  const memberId = env.AGENTROOM_MEMBER_ID;
+  const displayName = env.AGENTROOM_DISPLAY_NAME;
 
   if (!roomId) {
     throw new Error("AGENTROOM_ROOM_ID is required");
@@ -46,6 +51,8 @@ export function loadAgentRoomBridgeConfig(
     roomId,
     accessToken,
     workspace,
+    ...(memberId ? { memberId } : {}),
+    ...(displayName ? { displayName } : {}),
     sessionCardRoot: resolve(
       env.AGENTROOM_SESSION_CARD_ROOT ??
         resolve(workspace, ".agentroom", "session-cards"),
@@ -95,6 +102,11 @@ export function loadCodexBridgeConfig(
       env.AGENTROOM_STATE_FILE ??
       resolve(common.workspace, ".agentroom", `codex-${safeRoomId}.json`),
     codexCommand: env.AGENTROOM_CODEX_COMMAND ?? "codex",
+    ...(env.AGENTROOM_CODEX_APP_SERVER_ENDPOINT
+      ? {
+          codexAppServerEndpoint: env.AGENTROOM_CODEX_APP_SERVER_ENDPOINT,
+        }
+      : {}),
     codexRequestTimeoutMs: positiveInteger(
       env.AGENTROOM_CODEX_REQUEST_TIMEOUT_MS,
       30_000,

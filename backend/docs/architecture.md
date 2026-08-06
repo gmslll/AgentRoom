@@ -35,9 +35,11 @@ Manual CLI fallback ──────┘       │
   MCP supervisor that discovers private configs beneath the current project's
   `.agentroom/` directory. Users do not manually keep `agentroom run` open in
   the normal flow.
-- The provider-started MCP owns the Bridge lifetime. Codex receivers execute
-  targeted tasks in separate persisted App Server threads because standard MCP
-  cannot inject a new turn into the current Codex TUI. `agentroom run` remains
+- The provider-started MCP owns the Bridge lifetime. AgentRoom-launched Codex
+  sessions use a session-scoped local App Server endpoint (Unix socket on
+  macOS/Linux, loopback WebSocket on native Windows): the Bridge and
+  `codex --remote` TUI are separate clients subscribed to the same persisted
+  thread, so targeted tasks appear in the visible CLI. `agentroom run` remains
   an explicit service-manager and troubleshooting fallback.
 - Before provider dispatch, the Bridge writes an atomic, credential-free
   session card under the workspace's ignored `.agentroom/` directory. This is

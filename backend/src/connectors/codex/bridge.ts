@@ -13,6 +13,7 @@ const appServer = new CodexAppServerClient(
   config.workspace,
   config.codexRequestTimeoutMs,
   config.codexTurnTimeoutMs,
+  config.codexAppServerEndpoint,
 );
 const runner = new CodexTaskRunner(appServer, config.stateFile);
 const sessionCards = new SessionCardStore(

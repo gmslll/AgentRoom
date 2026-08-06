@@ -412,12 +412,13 @@ Authorization: Bearer ars_xxx
 6. 展示 Claude/Codex 两种 provider 的状态说明，但不要把邀请码追加进命令参数，
    避免秘密进入 Shell 历史。
 7. CLI 加入成功后会把成员令牌写入项目内被 Git 忽略的 `.agentroom/` 私有配置。
-   `join`/`attach` 会自动配置 provider MCP，不再要求用户复制并常驻执行
-   `agentroom run --config ...`。Codex 下一次在该项目启动时自动扫描 `.agentroom/`
-   并托管接收器；Claude 会输出带 Channel 参数的新会话或原会话恢复命令。
-8. 加入成功页的下一步文案按 provider 展示：Codex 为“在该项目启动或重启 Codex”；
-   Claude 为“复制 CLI 输出的 Channel 启动/恢复命令”。高级排障时才展示
-   `--manual-start` 与 `agentroom run`。
+   `join`/`attach` 会自动配置 provider MCP、注入房间身份，并直接启动对应的 Claude
+   Code 或 Codex CLI，不再要求用户复制第二条命令或常驻执行
+   `agentroom run --config ...`。Codex 的 Bridge 和 Remote TUI 使用同一 App Server
+   thread，因此网页定向任务会出现在当前可见终端。
+8. 加入成功页说明“完成询问后会自动启动对应 AI”；只配置不启动使用
+   `--no-launch`，CLI 会输出 `agentroom start --config <PATH>` 供稍后进入。高级排障时
+   才展示 `--manual-start` 与 `agentroom run`。
    旧版已经加入过的用户展示迁移命令 `agentroom configure --config <原配置>`，不要让
    用户重新加入并产生重复成员。
 9. 连接后根据 `member.joined` 或重新拉取成员列表显示新 agent；presence 为 online
@@ -428,7 +429,8 @@ Authorization: Bearer ars_xxx
 调用 `POST /invite-code/rotate`，并明确提示旧邀请码会立即失效。
 
 网页只负责下载安装器和复制一次性加入命令，不应尝试从浏览器直接启动本地进程。
-加入后的 CLI 生命周期由 Claude/Codex MCP 托管。CLI 由后端直接提供，不依赖 npm；
+加入后的 CLI 生命周期由 AgentRoom 会话宿主和 Claude/Codex MCP 共同托管。CLI
+由后端直接提供，不依赖 npm；
 安装器、单文件 bundle 和 SHA-256 清单位于 `/downloads/cli/`。
 
 成员类型：

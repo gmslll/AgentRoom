@@ -57,4 +57,29 @@ describe("parseStoredConfig", () => {
       }),
     ).toThrow(/must include memberId/);
   });
+
+  it("accepts only local Codex App Server endpoints", () => {
+    const local = parseStoredConfig({
+      version: 1,
+      baseUrl: "http://127.0.0.1:8787",
+      roomId: "room_1234567890",
+      accessToken: "art_secret",
+      provider: "codex",
+      workspace: "/work/project",
+      codexAppServerEndpoint: "ws://127.0.0.1:45123",
+    });
+    expect(local.codexAppServerEndpoint).toBe("ws://127.0.0.1:45123");
+
+    expect(() =>
+      parseStoredConfig({
+        version: 1,
+        baseUrl: "http://127.0.0.1:8787",
+        roomId: "room_1234567890",
+        accessToken: "art_secret",
+        provider: "codex",
+        workspace: "/work/project",
+        codexAppServerEndpoint: "ws://0.0.0.0:45123",
+      }),
+    ).toThrow(/must be a local/);
+  });
 });

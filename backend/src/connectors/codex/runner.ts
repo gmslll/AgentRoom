@@ -62,6 +62,7 @@ export class CodexTaskRunner implements AgentTaskRunner {
             ? await this.appServer.resumeThread(requestedThreadId)
             : await this.appServer.startOrResumeThread(requestedThreadId);
         await saveCodexState(this.stateFile, {
+          ...state,
           threadId: this.#threadId,
           ...(state?.resumeRequired ? { resumeRequired: true } : {}),
         });

@@ -1,18 +1,29 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, open, readFile, unlink, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  open,
+  readFile,
+  rename,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import {
   assertCodexThreadAttachable,
+  agentRoomConnectionPrompt,
+  type AgentRoomSessionContext,
   claudeMcpAddArgs,
   claudeResumeArgs,
   claudeServerName,
   claudeStartArgs,
+  codexBootstrapPrompt,
   codexMcpAddArgs,
   codexReceiverServerName,
+  codexRemoteResumeArgs,
   codexStatePath,
   commandLine,
   formatCodexThread,
@@ -20,7 +31,12 @@ import {
   resolveCodexThread,
 } from "./session-attach.js";
 import { CodexAppServerClient } from "./codex/app-server-client.js";
-import { saveCodexState } from "./codex/state.js";
+import {
+  codexSessionEndpoint,
+  codexSessionHostLockPath,
+  startCodexSessionHost,
+} from "./codex/session-host.js";
+import { loadCodexState, saveCodexState } from "./codex/state.js";
 import {
   type Provider,
   type StoredBridgeConfig,
@@ -42,7 +58,7 @@ declare const __AGENTROOM_CLI_DOWNLOAD_BASE__: string;
 const cliVersion =
   typeof __AGENTROOM_CLI_VERSION__ === "string"
     ? __AGENTROOM_CLI_VERSION__
-    : "0.2.4-dev";
+    : "0.3.0-dev";
 const cliDownloadBase =
   typeof __AGENTROOM_CLI_DOWNLOAD_BASE__ === "string"
     ? __AGENTROOM_CLI_DOWNLOAD_BASE__
@@ -61,6 +77,8 @@ try {
     await runCodexMcp(args);
   } else if (command === "configure") {
     await configureExistingBridge(args);
+  } else if (command === "start") {
+    await startConfiguredSession(args);
   } else if (command === "update") {
     await updateCli(args);
   } else if (command === "version" || command === "--version") {
@@ -80,6 +98,13 @@ async function joinRoom(args: string[], attach: boolean): Promise<void> {
     throw new Error("A room ID is required");
   }
   const prompt = createInterface({ input: stdin, output: stdout });
+  let promptClosed = false;
+  const closePrompt = () => {
+    if (!promptClosed) {
+      promptClosed = true;
+      prompt.close();
+    }
+  };
   try {
     const inviteCode =
       option(args, "--invite") ??
@@ -101,6 +126,7 @@ async function joinRoom(args: string[], attach: boolean): Promise<void> {
     const workspace = resolve(option(args, "--workspace") ?? process.cwd());
     const session = option(args, "--session") ?? "last";
     const manualStart = args.includes("--manual-start");
+    const noLaunch = args.includes("--no-launch") || !stdin.isTTY || !stdout.isTTY;
     const codexCommand =
       option(args, "--codex-command") ??
       process.env.AGENTROOM_CODEX_COMMAND ??
@@ -155,6 +181,10 @@ async function joinRoom(args: string[], attach: boolean): Promise<void> {
       provider === "codex"
         ? codexStatePath(workspace, roomId, memberId)
         : undefined;
+    const codexAppServerEndpoint =
+      provider === "codex" && !manualStart
+        ? codexSessionEndpoint(configPath)
+        : undefined;
     await mkdir(dirname(configPath), { recursive: true, mode: 0o700 });
 
     // Optionally keep the member token out of the config file, in the OS
@@ -180,8 +210,13 @@ async function joinRoom(args: string[], attach: boolean): Promise<void> {
       provider,
       workspace,
       memberId,
+      displayName,
+      ...(attach && provider === "claude"
+        ? { providerSession: session }
+        : {}),
       ...(credentialStore ? { credentialStore } : {}),
       ...(stateFile ? { stateFile } : {}),
+      ...(codexAppServerEndpoint ? { codexAppServerEndpoint } : {}),
     };
     await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, {
       encoding: "utf8",
@@ -198,49 +233,54 @@ async function joinRoom(args: string[], attach: boolean): Promise<void> {
       "--config",
       configPath,
     ]);
-    if (attach && provider === "codex") {
-      if (!codexThreadId || !stateFile) {
-        throw new Error("Codex session attachment was not initialized");
-      }
-      await saveCodexState(stateFile, {
-        threadId: codexThreadId,
-        resumeRequired: true,
-      });
-      console.log(`Attached existing Codex thread ${codexThreadId}.`);
-    }
-
     if (manualStart) {
       console.log(`Start the bridge with: ${runCommand}`);
     } else if (provider === "codex") {
+      if (!stateFile || !codexAppServerEndpoint) {
+        throw new Error("Codex session paths were not initialized");
+      }
+      if (attach && !codexThreadId) {
+        throw new Error("Codex session attachment was not initialized");
+      }
       configureCodexMcp(codexCommand, localCli, workspace);
       console.log(`Configured Codex MCP receiver ${codexReceiverServerName}.`);
-      console.log(
-        `Start or restart Codex in ${workspace}; AgentRoom will connect automatically.`,
-      );
-      console.log(
-        "Use /mcp or the agentroom_receiver_status tool to inspect the receiver.",
-      );
+      closePrompt();
+      await runCodexSession({
+        codexCommand,
+        configPath,
+        stateFile,
+        endpoint: codexAppServerEndpoint,
+        context: { roomId, memberId, displayName, workspace },
+        ...(codexThreadId ? { existingThreadId: codexThreadId } : {}),
+        injectConnection: true,
+        noLaunch,
+      });
     } else {
       const serverName = claudeServerName(roomId, memberId);
       const mcpArgs = claudeMcpAddArgs(serverName, configPath, localCli);
       configureClaudeMcp(claudeCommand, mcpArgs, workspace);
       console.log(`Configured Claude MCP channel ${serverName}.`);
-      console.log(
-        attach
-          ? "Exit the original Claude process before resuming it with:"
-          : "Start Claude Code with:",
-      );
-      console.log(
-        commandLine(
-          claudeCommand,
-          attach
-            ? claudeResumeArgs(session, serverName)
-            : claudeStartArgs(serverName),
-        ),
-      );
+      const context: AgentRoomSessionContext = {
+        roomId,
+        memberId,
+        displayName,
+        workspace,
+      };
+      const launchArgs = attach
+        ? claudeResumeArgs(session, serverName, context)
+        : claudeStartArgs(serverName, context);
+      closePrompt();
+      await launchOrPrint({
+        command: claudeCommand,
+        args: launchArgs,
+        workspace,
+        configPath,
+        noLaunch,
+        label: "Claude Code",
+      });
     }
   } finally {
-    prompt.close();
+    closePrompt();
   }
 }
 
@@ -265,6 +305,22 @@ async function runBridge(args: string[]): Promise<void> {
     process.env.AGENTROOM_ROOM_ID = config.roomId;
     process.env.AGENTROOM_ACCESS_TOKEN = accessToken;
     process.env.AGENTROOM_WORKSPACE = config.workspace;
+    if (config.memberId) {
+      process.env.AGENTROOM_MEMBER_ID = config.memberId;
+    } else {
+      delete process.env.AGENTROOM_MEMBER_ID;
+    }
+    if (config.displayName) {
+      process.env.AGENTROOM_DISPLAY_NAME = config.displayName;
+    } else {
+      delete process.env.AGENTROOM_DISPLAY_NAME;
+    }
+    if (config.codexAppServerEndpoint) {
+      process.env.AGENTROOM_CODEX_APP_SERVER_ENDPOINT =
+        config.codexAppServerEndpoint;
+    } else {
+      delete process.env.AGENTROOM_CODEX_APP_SERVER_ENDPOINT;
+    }
     if (config.stateFile) {
       process.env.AGENTROOM_STATE_FILE = config.stateFile;
     } else {
@@ -296,12 +352,13 @@ async function configureExistingBridge(args: string[]): Promise<void> {
     throw new Error("--config is required");
   }
   const resolvedConfigPath = resolve(configPath);
-  const config = parseStoredConfig(
+  let config = parseStoredConfig(
     JSON.parse(await readFile(resolvedConfigPath, "utf8")) as unknown,
   );
   const localCli = localCliInvocation();
 
   if (config.provider === "codex") {
+    config = await ensureCodexSessionConfig(resolvedConfigPath, config);
     const codexCommand =
       option(args, "--codex-command") ??
       process.env.AGENTROOM_CODEX_COMMAND ??
@@ -309,9 +366,8 @@ async function configureExistingBridge(args: string[]): Promise<void> {
     requireExecutable(codexCommand, "Codex");
     configureCodexMcp(codexCommand, localCli, config.workspace);
     console.log(`Configured Codex MCP receiver ${codexReceiverServerName}.`);
-    console.log(
-      `Start or restart Codex in ${config.workspace}; AgentRoom will connect automatically.`,
-    );
+    console.log("Start the connected Codex CLI with:");
+    console.log(configuredStartCommand(resolvedConfigPath));
     return;
   }
 
@@ -332,8 +388,291 @@ async function configureExistingBridge(args: string[]): Promise<void> {
     config.workspace,
   );
   console.log(`Configured Claude MCP channel ${serverName}.`);
-  console.log("Start Claude Code with:");
-  console.log(commandLine(claudeCommand, claudeStartArgs(serverName)));
+  console.log("Start the connected Claude Code CLI with:");
+  console.log(configuredStartCommand(resolvedConfigPath));
+}
+
+async function startConfiguredSession(args: string[]): Promise<void> {
+  const configPath = option(args, "--config") ?? positional(args, 0);
+  if (!configPath) {
+    throw new Error("--config is required");
+  }
+  const resolvedConfigPath = resolve(configPath);
+  let config = parseStoredConfig(
+    JSON.parse(await readFile(resolvedConfigPath, "utf8")) as unknown,
+  );
+  if (!config.memberId) {
+    throw new Error(
+      "The bridge config has no memberId; join the room again before starting an interactive session",
+    );
+  }
+  const noLaunch = args.includes("--no-launch") || !stdin.isTTY || !stdout.isTTY;
+  const context: AgentRoomSessionContext = {
+    roomId: config.roomId,
+    memberId: config.memberId,
+    displayName:
+      config.displayName ?? (config.provider === "claude" ? "Claude" : "Codex"),
+    workspace: config.workspace,
+  };
+
+  if (config.provider === "claude") {
+    const claudeCommand =
+      option(args, "--claude-command") ??
+      process.env.AGENTROOM_CLAUDE_COMMAND ??
+      "claude";
+    requireExecutable(claudeCommand, "Claude Code");
+    const serverName = claudeServerName(config.roomId, config.memberId);
+    await launchOrPrint({
+      command: claudeCommand,
+      args: config.providerSession
+        ? claudeResumeArgs(config.providerSession, serverName, context)
+        : claudeStartArgs(serverName, context),
+      workspace: config.workspace,
+      configPath: resolvedConfigPath,
+      noLaunch,
+      label: "Claude Code",
+    });
+    return;
+  }
+
+  config = await ensureCodexSessionConfig(resolvedConfigPath, config);
+  if (!config.stateFile || !config.codexAppServerEndpoint) {
+    throw new Error("Codex session config upgrade did not produce local session paths");
+  }
+  const codexCommand =
+    option(args, "--codex-command") ??
+    process.env.AGENTROOM_CODEX_COMMAND ??
+    "codex";
+  requireExecutable(codexCommand, "Codex");
+  configureCodexMcp(
+    codexCommand,
+    localCliInvocation(),
+    config.workspace,
+  );
+  const state = await loadCodexState(config.stateFile);
+  await runCodexSession({
+    codexCommand,
+    configPath: resolvedConfigPath,
+    stateFile: config.stateFile,
+    endpoint: config.codexAppServerEndpoint,
+    context,
+    ...(state?.threadId ? { existingThreadId: state.threadId } : {}),
+    injectConnection: !state?.threadId,
+    noLaunch,
+  });
+}
+
+interface CodexSessionOptions {
+  codexCommand: string;
+  configPath: string;
+  stateFile: string;
+  endpoint: string;
+  context: AgentRoomSessionContext;
+  existingThreadId?: string;
+  injectConnection: boolean;
+  noLaunch: boolean;
+}
+
+async function runCodexSession(options: CodexSessionOptions): Promise<void> {
+  const hostLockPath = codexSessionHostLockPath(options.configPath);
+  await mkdir(dirname(hostLockPath), { recursive: true, mode: 0o700 });
+  const releaseHostLock = await acquireLock(hostLockPath);
+  let host: Awaited<ReturnType<typeof startCodexSessionHost>> | undefined;
+  let appServer: CodexAppServerClient | undefined;
+  try {
+    const releaseBridgeLock = await acquireLock(`${options.configPath}.lock`);
+    let threadId: string;
+    try {
+      host = await startCodexSessionHost(
+        options.codexCommand,
+        options.context.workspace,
+        options.endpoint,
+      );
+      appServer = new CodexAppServerClient(
+        options.codexCommand,
+        options.context.workspace,
+        30_000,
+        30 * 60_000,
+        host.endpoint,
+      );
+      await appServer.start();
+      const existingState = await loadCodexState(options.stateFile);
+      const requestedThreadId = options.existingThreadId ?? existingState?.threadId;
+      const developerInstructions = agentRoomConnectionPrompt(options.context);
+      threadId = requestedThreadId
+        ? await appServer.resumeThread(requestedThreadId, developerInstructions)
+        : await appServer.startOrResumeThread(undefined, developerInstructions);
+      await saveCodexState(options.stateFile, {
+        ...existingState,
+        threadId,
+        resumeRequired: true,
+      });
+
+      if (options.injectConnection) {
+        await appServer.runTurn(threadId, codexBootstrapPrompt(options.context));
+        if (!requestedThreadId) {
+          await appServer.setThreadName(
+            threadId,
+            `AgentRoom · ${safeDisplayName(options.context.displayName, "Codex")}`,
+          );
+        }
+      }
+    } finally {
+      appServer?.close();
+      appServer = undefined;
+      await releaseBridgeLock();
+    }
+
+    const launchArgs = codexRemoteResumeArgs(
+      threadId,
+      options.endpoint,
+    );
+    if (options.noLaunch) {
+      console.log("Codex session prepared. Start it later with:");
+      console.log(configuredStartCommand(options.configPath));
+      return;
+    }
+
+    console.log(
+      `Starting Codex CLI for ${options.context.roomId}; AgentRoom tasks will appear in this session.`,
+    );
+    await runInteractive(
+      options.codexCommand,
+      launchArgs,
+      options.context.workspace,
+      "Codex CLI",
+    );
+  } finally {
+    appServer?.close();
+    await host?.close();
+    await releaseHostLock();
+  }
+}
+
+interface LaunchOptions {
+  command: string;
+  args: string[];
+  workspace: string;
+  configPath: string;
+  noLaunch: boolean;
+  label: string;
+}
+
+async function launchOrPrint(options: LaunchOptions): Promise<void> {
+  if (options.noLaunch) {
+    console.log(`${options.label} configured. Start it later with:`);
+    console.log(configuredStartCommand(options.configPath));
+    return;
+  }
+  console.log(`Starting ${options.label}; AgentRoom is attached to this session.`);
+  await runInteractive(
+    options.command,
+    options.args,
+    options.workspace,
+    options.label,
+  );
+}
+
+async function runInteractive(
+  command: string,
+  args: string[],
+  workspace: string,
+  label: string,
+): Promise<void> {
+  const child = spawn(command, args, {
+    cwd: workspace,
+    stdio: "inherit",
+  });
+  const forwardInterrupt = () => child.kill("SIGINT");
+  const forwardTermination = () => child.kill("SIGTERM");
+  process.once("SIGINT", forwardInterrupt);
+  process.once("SIGTERM", forwardTermination);
+  try {
+    await new Promise<void>((resolvePromise, reject) => {
+      child.once("error", reject);
+      child.once("exit", (code, signal) => {
+        if (code === 0 || signal === "SIGINT" || signal === "SIGTERM") {
+          resolvePromise();
+          return;
+        }
+        reject(
+          new Error(
+            `${label} exited (${signal ?? `code ${code ?? "unknown"}`})`,
+          ),
+        );
+      });
+    });
+  } finally {
+    process.off("SIGINT", forwardInterrupt);
+    process.off("SIGTERM", forwardTermination);
+  }
+}
+
+async function ensureCodexSessionConfig(
+  configPath: string,
+  config: StoredBridgeConfig,
+): Promise<StoredBridgeConfig> {
+  if (!config.memberId) {
+    throw new Error(
+      "The existing Codex config has no memberId; join the room again to create an interactive session config",
+    );
+  }
+  const stateFile =
+    config.stateFile ??
+    codexStatePath(config.workspace, config.roomId, config.memberId);
+  const codexAppServerEndpoint =
+    config.codexAppServerEndpoint ?? codexSessionEndpoint(configPath);
+  if (
+    config.stateFile === stateFile &&
+    config.codexAppServerEndpoint === codexAppServerEndpoint
+  ) {
+    return config;
+  }
+  const upgraded: StoredBridgeConfig = {
+    ...config,
+    stateFile,
+    codexAppServerEndpoint,
+  };
+  await saveStoredConfig(configPath, upgraded);
+  console.log("Upgraded the Codex bridge config for visible Remote TUI delivery.");
+  return upgraded;
+}
+
+async function saveStoredConfig(
+  path: string,
+  config: StoredBridgeConfig,
+): Promise<void> {
+  const temporaryPath = `${path}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    await writeFile(temporaryPath, `${JSON.stringify(config, null, 2)}\n`, {
+      encoding: "utf8",
+      mode: 0o600,
+      flag: "wx",
+    });
+    await rename(temporaryPath, path);
+  } finally {
+    await unlink(temporaryPath).catch(() => undefined);
+  }
+}
+
+function configuredStartCommand(configPath: string): string {
+  const cli = localCliInvocation();
+  return commandLine(cli.command, [
+    ...cli.args,
+    "start",
+    "--config",
+    resolve(configPath),
+  ]);
+}
+
+function safeDisplayName(value: string, fallback: string): string {
+  return (
+    value
+      .replaceAll(/[\u0000-\u001f\u007f-\u009f]/g, "")
+      .replaceAll(/\s+/g, " ")
+      .trim()
+      .slice(0, 80) || fallback
+  );
 }
 
 async function updateCli(args: string[]): Promise<void> {
@@ -694,11 +1033,14 @@ function printUsage(): void {
 Usage:
   agentroom join <room-id> [--invite CODE] [--provider claude|codex]
                  [--name NAME] [--base-url URL] [--workspace PATH]
-                 [--credential-store file|keychain] [--manual-start]
+                 [--credential-store file|keychain] [--no-launch]
+                 [--manual-start]
   agentroom attach <room-id> [--invite CODE] [--provider claude|codex]
                    [--session last|ID|NAME] [--name NAME]
                    [--base-url URL] [--workspace PATH]
-                   [--credential-store file|keychain] [--manual-start]
+                   [--credential-store file|keychain] [--no-launch]
+                   [--manual-start]
+  agentroom start --config PATH [--no-launch]
   agentroom run --config PATH
   agentroom mcp [--workspace PATH]
   agentroom configure --config PATH

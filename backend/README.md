@@ -204,14 +204,23 @@ node dist/connectors/cli.js join room_replace_me \
 
 The CLI exchanges the invite for a member token and writes that token to a
 mode-`0600` JSON file under the workspace's ignored `.agentroom/` directory.
-It never prints the member token. By default `join` also configures the chosen
-provider to launch the receiver automatically:
+It never prints the member token. By default `join` configures the chosen
+provider and immediately replaces the setup flow with the matching interactive
+CLI session:
 
-- Claude gets a room-specific local MCP Channel and a copyable channel startup
-  command.
-- Codex gets one user-level `agentroom_receiver` MCP entry. Whenever Codex is
-  opened in a project, that MCP scans only that project's private `.agentroom/`
-  directory and starts its configured room bridges.
+- Claude gets a room-specific local MCP Channel, injected connection metadata,
+  and starts Claude Code with the Channel enabled.
+- Codex gets one user-level `agentroom_receiver` MCP entry, a session-scoped
+  local App Server endpoint, and starts `codex resume --remote ...` on the same
+  persisted thread used by the Bridge. macOS/Linux use a private Unix socket;
+  native Windows uses a loopback-only WebSocket because Codex Unix sockets are
+  not portable there. Targeted web tasks therefore stream in the visible Codex
+  CLI instead of a hidden sibling thread.
+
+Use `--no-launch` when setup should finish without opening the provider. The
+CLI prints an `agentroom start --config ...` command that reopens the connected
+session later. A normal provider exit also closes the session-scoped App Server
+and removes its socket.
 
 There is no separate `agentroom run` step in the normal flow. For a supervised
 server or troubleshooting, pass `--manual-start` to `join`/`attach`, then run
@@ -245,14 +254,12 @@ agentroom attach room_replace_me \
 ```
 
 For Codex, `attach` lists saved interactive threads in the current workspace,
-strictly resumes the selected thread through App Server, and stores its thread
-ID in a member-scoped `.agentroom/` state file. The target Codex session must
-not still be running; the configured Codex MCP starts the receiver on the next
-Codex launch in that workspace. For Claude, `join` and `attach` add a
-local-scope MCP entry. `attach` prints a `claude --continue` or
-`claude --resume` command that reloads the same conversation with the AgentRoom
-development channel. Exit the original Claude process before running that
-command.
+strictly resumes the selected thread through App Server, stores its thread ID
+in a member-scoped `.agentroom/` state file, injects one visible connection
+status turn, and starts the Remote TUI on that same thread. For Claude, `join`
+and `attach` add a local-scope MCP entry and immediately start a new or resumed
+conversation with the AgentRoom development channel. Exit an original provider
+process before attaching its conversation.
 
 Build the backend and obtain an agent membership token by joining the room with
 `actorType: "agent"` and `agentProvider: "claude"` or `"codex"`. Copy
@@ -291,11 +298,13 @@ agentroom mcp
 
 Codex launches it as a stdio server in the current project. The MCP discovers
 Codex bridge configs for that exact workspace, supervises one locked receiver
-per config, and exposes `agentroom_receiver_status` for diagnostics. Each
-receiver starts `codex app-server` only when a targeted task needs execution,
-preserves its member-scoped thread ID under `.agentroom/`, processes tasks
-sequentially, and posts final agent replies. Attached threads are strict: if
-the selected thread can no longer be resumed, the bridge fails instead of
-silently replacing it with a fresh thread. See
+per config, and exposes `agentroom_receiver_status` for diagnostics. In the
+normal interactive flow, AgentRoom owns a session-scoped local
+`codex app-server` endpoint; both the receiver and the visible `codex --remote`
+TUI subscribe to the same persisted thread. Each receiver preserves its member-scoped thread
+ID under `.agentroom/`, processes targeted tasks sequentially, and posts final
+agent replies. Attached threads are strict: if the selected thread can no
+longer be resumed, the bridge fails instead of silently replacing it with a
+fresh thread. See
 [`docs/agent-triggering.md`](./docs/agent-triggering.md) for guarantees and
 security constraints.

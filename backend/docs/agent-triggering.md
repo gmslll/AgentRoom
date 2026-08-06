@@ -77,10 +77,11 @@ Events arrive only while that Claude session and its channel process are
 running. Ordinary MCP servers and hooks do not wake an idle Claude turn.
 
 `agentroom join` and `agentroom attach` configure the channel as a local-scope
-MCP server, so Claude starts the CLI receiver itself. `join` prints a fresh
-Claude startup command and `attach` prints a resume command for an existing
-conversation. Channel opt-in is a startup setting, so an already open Claude
-process must exit and resume with the printed development-channel flag.
+MCP server, inject room/member/workspace metadata into Claude's startup system
+context, and start Claude Code immediately. `join` opens a fresh session and
+`attach` resumes an existing conversation. Claude's native Channels banner
+shows the room-scoped server at startup. Channel opt-in is a startup setting,
+so an already open Claude process must exit before it is attached.
 Resuming preserves the conversation; starting the same session concurrently in
 two terminals is unsupported by the AgentRoom workflow.
 
@@ -99,9 +100,13 @@ therefore acts as the local session host:
 2. Codex starts that MCP in its current workspace; it scans only direct JSON
    files under that workspace's private `.agentroom/` directory.
 3. The MCP supervises one process-locked Bridge per Codex room config.
-4. On the first targeted task, the Bridge spawns `codex app-server`, initializes
-   JSON-RPC, and starts or resumes one persisted thread.
-5. Persist a local session card, queue targeted deliveries, and call
+4. AgentRoom starts one session-scoped local `codex app-server` endpoint (a
+   private Unix socket on macOS/Linux or `127.0.0.1` WebSocket on Windows). The
+   Bridge and visible `codex --remote` TUI initialize independent JSON-RPC
+   connections, resume the same persisted thread, and automatically subscribe
+   to its turn/item events.
+5. `join`/`attach` writes a visible connection-status turn before entering the
+   TUI. Later, persist a local session card, queue targeted deliveries, and call
    `turn/start` sequentially.
 6. Capture the final `agentMessage` from app-server events.
 7. Post it through the same AgentRoom delivery reply endpoint.
@@ -110,8 +115,9 @@ The MCP exposes `agentroom_receiver_status` and
 `agentroom_receiver_rescan` for local diagnostics. These tools never reveal
 the member token. Multiple Codex sessions in one workspace are safe: the
 member-config lock selects one receiver, and another MCP takes over after the
-owner exits. Closing Codex closes its MCP children; a still-open sibling Codex
-session discovers the released config on its next scan.
+owner exits. Closing the AgentRoom-launched Codex CLI closes the App Server,
+its MCP children, the Bridge, and the private socket. Reopen it with the
+printed `agentroom start --config ...` command.
 
 The Codex MCP performs the same automatic update and verified stdio relay before
 workspace discovery. This makes one per-user installation self-maintaining for
@@ -131,9 +137,9 @@ accidentally share a thread.
 
 `agentroom attach` calls `thread/list` for the selected workspace and
 `thread/resume` for the chosen existing conversation. The discovery app-server
-is then closed before the provider-started MCP owns the long-running Bridge.
-An attached state is marked `resumeRequired`; a missing or invalid thread fails
-closed instead of falling back to `thread/start`.
+is then closed before the session-scoped App Server becomes the long-running
+host. An attached state is marked `resumeRequired`; a missing or invalid thread
+fails closed instead of falling back to `thread/start`.
 
 `codex exec resume` remains a possible fallback for one-shot automation, but
 App Server is the primary integration because it preserves a long-lived thread

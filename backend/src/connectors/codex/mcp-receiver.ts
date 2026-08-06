@@ -17,12 +17,12 @@ const supervisor = new CodexMcpSupervisor({
   cli: localCliInvocation(),
 });
 const mcp = new Server(
-  { name: "agentroom-receiver", version: "0.2.4" },
+  { name: "agentroom-receiver", version: "0.3.0" },
   {
     capabilities: { tools: {} },
     instructions:
       "This MCP automatically starts AgentRoom Codex receivers configured under the current workspace's private .agentroom directory. " +
-      "Targeted room tasks execute in a separate persisted Codex App Server thread; they do not interrupt the current interactive turn. " +
+      "When the session was started through AgentRoom, targeted room tasks execute in the same Remote TUI thread and appear in the visible Codex CLI. " +
       "Use agentroom_receiver_status to diagnose room connectivity. Normal room chat messages never start an agent task.",
   },
 );

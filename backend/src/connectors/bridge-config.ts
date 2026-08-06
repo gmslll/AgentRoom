@@ -15,6 +15,9 @@ export interface StoredBridgeConfig {
   workspace: string;
   stateFile?: string;
   memberId?: string;
+  displayName?: string;
+  providerSession?: string;
+  codexAppServerEndpoint?: string;
   credentialStore?: "keychain";
 }
 
@@ -25,6 +28,12 @@ export function parseStoredConfig(value: unknown): StoredBridgeConfig {
   const config = value as Record<string, unknown>;
   const stateFile = optionalString(config, "stateFile");
   const memberId = optionalString(config, "memberId");
+  const displayName = optionalString(config, "displayName");
+  const providerSession = optionalString(config, "providerSession");
+  const codexAppServerEndpoint = optionalString(
+    config,
+    "codexAppServerEndpoint",
+  );
   const credentialStore =
     config.credentialStore === "keychain" ? "keychain" : undefined;
   // With the keychain store the token intentionally never lands in the file:
@@ -48,8 +57,33 @@ export function parseStoredConfig(value: unknown): StoredBridgeConfig {
     workspace: resolve(requiredString(config, "workspace")),
     ...(stateFile ? { stateFile: resolve(stateFile) } : {}),
     ...(memberId ? { memberId } : {}),
+    ...(displayName ? { displayName } : {}),
+    ...(providerSession ? { providerSession } : {}),
+    ...(codexAppServerEndpoint
+      ? { codexAppServerEndpoint: normalizeCodexEndpoint(codexAppServerEndpoint) }
+      : {}),
     ...(credentialStore ? { credentialStore } : {}),
   };
+}
+
+function normalizeCodexEndpoint(value: string): string {
+  if (value.startsWith("unix://")) {
+    const path = value.slice("unix://".length);
+    if (!path) {
+      throw new Error("Bridge config Codex Unix endpoint is missing its path");
+    }
+    return `unix://${resolve(path)}`;
+  }
+  const url = new URL(value);
+  if (
+    url.protocol !== "ws:" ||
+    (url.hostname !== "127.0.0.1" && url.hostname !== "localhost")
+  ) {
+    throw new Error(
+      "Bridge config Codex endpoint must be a local unix:// or ws://127.0.0.1 URL",
+    );
+  }
+  return url.toString().replace(/\/$/, "");
 }
 
 export async function resolveKeychainToken(
