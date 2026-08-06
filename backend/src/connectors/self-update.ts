@@ -20,7 +20,10 @@ export interface CliUpdateResult {
 interface CliUpdateOptions {
   downloadBase: string;
   targetPath: string;
+  currentVersion?: string;
   fetchImpl?: typeof fetch;
+  manifestTimeoutMs?: number;
+  bundleTimeoutMs?: number;
 }
 
 interface UpdateManifest {
@@ -47,8 +50,11 @@ export async function updateInstalledCli(
 
   try {
     const manifestResponse = await fetchImpl(`${downloadBase}/manifest.json`, {
-      headers: { accept: "application/json" },
-      signal: AbortSignal.timeout(15_000),
+      headers: {
+        accept: "application/json",
+        "user-agent": "agentroom-cli-updater",
+      },
+      signal: AbortSignal.timeout(options.manifestTimeoutMs ?? 15_000),
     });
     if (!manifestResponse.ok) {
       throw new Error(
@@ -59,6 +65,16 @@ export async function updateInstalledCli(
     const currentSha256 = createHash("sha256")
       .update(await readFile(targetPath))
       .digest("hex");
+    if (
+      options.currentVersion &&
+      compareCliVersions(manifest.version, options.currentVersion) < 0
+    ) {
+      return {
+        updated: false,
+        version: options.currentVersion,
+        sha256: currentSha256,
+      };
+    }
     if (currentSha256 === manifest.bundle.sha256) {
       return {
         updated: false,
@@ -70,8 +86,11 @@ export async function updateInstalledCli(
     const bundleResponse = await fetchImpl(
       `${downloadBase}/${encodeURIComponent(manifest.bundle.name)}`,
       {
-        headers: { accept: "text/javascript" },
-        signal: AbortSignal.timeout(30_000),
+        headers: {
+          accept: "text/javascript",
+          "user-agent": "agentroom-cli-updater",
+        },
+        signal: AbortSignal.timeout(options.bundleTimeoutMs ?? 30_000),
       },
     );
     if (!bundleResponse.ok) {
@@ -100,6 +119,54 @@ export async function updateInstalledCli(
   } finally {
     await releaseLock();
   }
+}
+
+export function compareCliVersions(left: string, right: string): number {
+  const leftVersion = parseCliVersion(left);
+  const rightVersion = parseCliVersion(right);
+  for (const key of ["major", "minor", "patch"] as const) {
+    const difference = leftVersion[key] - rightVersion[key];
+    if (difference !== 0) {
+      return Math.sign(difference);
+    }
+  }
+  if (!leftVersion.prerelease && !rightVersion.prerelease) {
+    return 0;
+  }
+  if (!leftVersion.prerelease) {
+    return 1;
+  }
+  if (!rightVersion.prerelease) {
+    return -1;
+  }
+
+  const length = Math.max(
+    leftVersion.prerelease.length,
+    rightVersion.prerelease.length,
+  );
+  for (let index = 0; index < length; index += 1) {
+    const leftIdentifier = leftVersion.prerelease[index];
+    const rightIdentifier = rightVersion.prerelease[index];
+    if (leftIdentifier === undefined) {
+      return -1;
+    }
+    if (rightIdentifier === undefined) {
+      return 1;
+    }
+    if (leftIdentifier === rightIdentifier) {
+      continue;
+    }
+    const leftNumeric = /^\d+$/.test(leftIdentifier);
+    const rightNumeric = /^\d+$/.test(rightIdentifier);
+    if (leftNumeric && rightNumeric) {
+      return Math.sign(Number(leftIdentifier) - Number(rightIdentifier));
+    }
+    if (leftNumeric !== rightNumeric) {
+      return leftNumeric ? -1 : 1;
+    }
+    return leftIdentifier.localeCompare(rightIdentifier) < 0 ? -1 : 1;
+  }
+  return 0;
 }
 
 export function parseUpdateManifest(value: unknown): UpdateManifest {
@@ -147,6 +214,26 @@ function normalizeDownloadBase(value: string): string {
     );
   }
   return url.toString().replace(/\/$/, "");
+}
+
+function parseCliVersion(value: string): {
+  major: number;
+  minor: number;
+  patch: number;
+  prerelease?: string[];
+} {
+  const match =
+    /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/.exec(value);
+  if (!match) {
+    throw new Error(`Invalid AgentRoom CLI version: ${value}`);
+  }
+  const prerelease = match[4]?.split(".");
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: Number(match[3]),
+    ...(prerelease ? { prerelease } : {}),
+  };
 }
 
 function asObject(value: unknown): Record<string, unknown> {

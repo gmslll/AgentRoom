@@ -84,6 +84,12 @@ process must exit and resume with the printed development-channel flag.
 Resuming preserves the conversation; starting the same session concurrently in
 two terminals is unsupported by the AgentRoom workflow.
 
+Before the Channel MCP claims stdio, the globally installed CLI compares its
+own bundle hash with the no-cache release manifest. A mismatch is downloaded,
+size/SHA-256 verified, atomically installed, and relaunched on the same stdio
+handles. Update failures are reported on stderr and the current receiver still
+starts; MCP protocol stdout remains clean.
+
 ## Codex
 
 Codex does not currently expose the Claude Channel extension. The Codex adapter
@@ -106,6 +112,11 @@ the member token. Multiple Codex sessions in one workspace are safe: the
 member-config lock selects one receiver, and another MCP takes over after the
 owner exits. Closing Codex closes its MCP children; a still-open sibling Codex
 session discovers the released config on its next scan.
+
+The Codex MCP performs the same automatic update and verified stdio relay before
+workspace discovery. This makes one per-user installation self-maintaining for
+both providers. `AGENTROOM_DISABLE_AUTO_UPDATE=true` is the explicit opt-out for
+managed environments.
 
 The App Server `turn/start` response records `host_delivered` and
 `agent_acknowledged`; merely putting the delivery in the local worker queue

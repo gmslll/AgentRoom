@@ -402,7 +402,8 @@ Authorization: Bearer ars_xxx
 1. 提示用户先安装 Node.js 22+，以及已经登录的 Claude Code 或 Codex CLI。
 2. 根据浏览器平台提供“下载 macOS/Linux 安装器”和“下载 Windows 安装器”；链接
    必须直接使用 `connector.installers`，不要前端手拼。同一系统用户只需安装一次，
-   Claude/Codex 共用稳定的用户级全局 CLI；更新命令为 `agentroom update`。
+   Claude/Codex 共用稳定的用户级全局 CLI；每次 Provider MCP 启动会自动核对线上
+   manifest 并下载校验不一致的版本，手工更新命令仍为 `agentroom update`。
 3. 安装完成后提示用户按安装器输出完成 PATH 配置，再在终端 `cd` 到希望 AI 操作的
    项目目录。
 4. 提供“新会话加入”和“已有会话加入”两个复制按钮，分别复制

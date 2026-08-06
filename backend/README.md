@@ -182,8 +182,16 @@ agentroom update
 The updater reads the no-cache release manifest, verifies size and SHA-256,
 and atomically replaces the shared bundle. Existing provider MCP entries keep
 working because they reference the stable path; restart Claude/Codex to load
-the new process. The installers and updater never require administrator access,
-npm, or npx. In a source checkout,
+the new process. Provider-started `agentroom run` and `agentroom mcp` processes
+also perform this check automatically before claiming MCP stdio. When the
+installed hash differs, they download and verify the new bundle, then relay the
+same stdio connection to the new process. A timeout or unavailable update
+service fails open to the already installed receiver so room connectivity is
+not blocked. Set `AGENTROOM_DISABLE_AUTO_UPDATE=true` only for a centrally
+managed or intentionally pinned installation.
+
+The installers and updater never require administrator access, npm, or npx. In
+a source checkout,
 build the backend and run the same CLI directly:
 
 ```bash

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdir, open, readFile, unlink, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import {
@@ -41,7 +42,7 @@ declare const __AGENTROOM_CLI_DOWNLOAD_BASE__: string;
 const cliVersion =
   typeof __AGENTROOM_CLI_VERSION__ === "string"
     ? __AGENTROOM_CLI_VERSION__
-    : "0.2.0-dev";
+    : "0.2.1-dev";
 const cliDownloadBase =
   typeof __AGENTROOM_CLI_DOWNLOAD_BASE__ === "string"
     ? __AGENTROOM_CLI_DOWNLOAD_BASE__
@@ -244,6 +245,9 @@ async function joinRoom(args: string[], attach: boolean): Promise<void> {
 }
 
 async function runBridge(args: string[]): Promise<void> {
+  if (await autoUpdateReceiver("run", args)) {
+    return;
+  }
   const configPath = option(args, "--config") ?? positional(args, 0);
   if (!configPath) {
     throw new Error("--config is required");
@@ -278,6 +282,9 @@ async function runBridge(args: string[]): Promise<void> {
 }
 
 async function runCodexMcp(args: string[]): Promise<void> {
+  if (await autoUpdateReceiver("mcp", args)) {
+    return;
+  }
   const workspace = resolve(option(args, "--workspace") ?? process.cwd());
   process.env.AGENTROOM_DISCOVERY_WORKSPACE = workspace;
   await import("./codex/mcp-receiver.js");
@@ -342,6 +349,7 @@ async function updateCli(args: string[]): Promise<void> {
       process.env.AGENTROOM_DOWNLOAD_BASE ??
       cliDownloadBase,
     targetPath,
+    currentVersion: cliVersion,
   });
   if (result.updated) {
     console.log(
@@ -354,6 +362,108 @@ async function updateCli(args: string[]): Promise<void> {
     console.log(
       `AgentRoom CLI is already current (${result.version}, ${result.sha256.slice(0, 12)}).`,
     );
+  }
+}
+
+async function autoUpdateReceiver(
+  subcommand: "run" | "mcp",
+  args: string[],
+): Promise<boolean> {
+  if (process.env.AGENTROOM_AUTO_UPDATE_RELAUNCHED === "true") {
+    delete process.env.AGENTROOM_AUTO_UPDATE_RELAUNCHED;
+    return false;
+  }
+  if (process.env.AGENTROOM_DISABLE_AUTO_UPDATE === "true") {
+    return false;
+  }
+  const entry = process.env.AGENTROOM_CLI_ENTRY ?? process.argv[1];
+  if (!entry) {
+    return false;
+  }
+  const targetPath = resolve(entry);
+  if (basename(targetPath) !== "agentroom.mjs") {
+    return false;
+  }
+
+  try {
+    const runningSha256 = createHash("sha256")
+      .update(await readFile(targetPath))
+      .digest("hex");
+    const update = await updateInstalledCli({
+      downloadBase:
+        process.env.AGENTROOM_DOWNLOAD_BASE ?? cliDownloadBase,
+      targetPath,
+      currentVersion: cliVersion,
+      manifestTimeoutMs: 2_000,
+      bundleTimeoutMs: 5_000,
+    });
+    if (runningSha256 === update.sha256) {
+      return false;
+    }
+
+    console.error(
+      `AgentRoom CLI ${update.version} downloaded and verified; restarting the ${subcommand} receiver with ${update.sha256.slice(0, 12)}.`,
+    );
+    try {
+      await relayToUpdatedCli(targetPath, subcommand, args);
+      return true;
+    } catch (error) {
+      console.error(
+        "Could not hand the receiver to the updated CLI; continuing with the already loaded version:",
+        error instanceof Error ? error.message : String(error),
+      );
+      return false;
+    }
+  } catch (error) {
+    console.error(
+      `AgentRoom automatic update check failed; continuing with ${cliVersion}:`,
+      error instanceof Error ? error.message : String(error),
+    );
+    return false;
+  }
+}
+
+async function relayToUpdatedCli(
+  targetPath: string,
+  subcommand: "run" | "mcp",
+  args: string[],
+): Promise<void> {
+  const child = spawn(
+    process.execPath,
+    [targetPath, subcommand, ...args],
+    {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        AGENTROOM_AUTO_UPDATE_RELAUNCHED: "true",
+        AGENTROOM_CLI_ENTRY: targetPath,
+      },
+      stdio: "inherit",
+    },
+  );
+  const forwardInterrupt = () => child.kill("SIGINT");
+  const forwardTermination = () => child.kill("SIGTERM");
+  process.once("SIGINT", forwardInterrupt);
+  process.once("SIGTERM", forwardTermination);
+
+  try {
+    await new Promise<void>((resolvePromise, reject) => {
+      child.once("error", reject);
+      child.once("exit", (code, signal) => {
+        if (code === 0 || signal === "SIGINT" || signal === "SIGTERM") {
+          resolvePromise();
+        } else {
+          reject(
+            new Error(
+              `Updated AgentRoom CLI exited (${signal ?? `code ${code ?? "unknown"}`})`,
+            ),
+          );
+        }
+      });
+    });
+  } finally {
+    process.off("SIGINT", forwardInterrupt);
+    process.off("SIGTERM", forwardTermination);
   }
 }
 

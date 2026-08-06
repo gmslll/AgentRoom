@@ -36,7 +36,9 @@ Claude launches its room Channel MCP and Codex launches a single
 workspace-aware receiver MCP. `agentroom run` is a manual fallback, not a
 normal user step. Both providers reuse one stable per-user CLI installation;
 `agentroom update` verifies and atomically replaces its bundle without changing
-MCP command paths.
+MCP command paths. Provider-started MCP processes perform the same manifest and
+hash check automatically, then relay stdio to the verified replacement before
+starting the room receiver.
 
 Normal `text` messages never start an agent. An explicit `agent.task` names one
 or more agent member IDs and creates a delivery for each target. Bridges recover

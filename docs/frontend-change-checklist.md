@@ -41,7 +41,8 @@ session-card 是目标电脑 `.agentroom/` 下的本地可靠性证据。它没�
   `agentroom run --config ...`。Codex 提示在目标项目启动/重启；Claude 展示 CLI
   返回的 Channel 启动或恢复命令。
 - 安装说明写明同一系统用户的 Claude/Codex 共用一份用户级全局 CLI，并提供
-  `agentroom update`；旧配置用 `agentroom configure --config <PATH>` 原地迁移。
+  `agentroom update`；同时说明 Provider MCP 启动会自动校验并更新。旧配置用
+  `agentroom configure --config <PATH>` 原地迁移。
 
 文件、OAuth、邮件和审核都是后端已实现但依赖生产配置的能力。对应配置未由后端确认
 前，前端用产品功能开关隐藏入口；不要通过“路由是否返回 404”做能力探测。
