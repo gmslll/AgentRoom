@@ -77,10 +77,11 @@ export class PostgresFileRepository implements FileRepository {
   ): Promise<AttachmentStorageRecord | undefined> {
     const result = await this.#pool.query<{ id: string }>(
       `INSERT INTO attachments
-         (id, room_id, uploader_member_id, name, media_type, size, sha256,
+       (id, room_id, uploader_member_id, name, media_type, size, sha256,
           storage_key, scan_state, created_at)
-       SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
-       WHERE (SELECT COALESCE(SUM(size), 0) FROM attachments WHERE room_id = $2) + $6 <= $11
+       SELECT $1, $2, $3, $4, $5, $6::bigint, $7, $8, $9, $10
+       WHERE (SELECT COALESCE(SUM(size), 0) FROM attachments WHERE room_id = $2)
+             + $6::bigint <= $11::numeric
        RETURNING id`,
       [
         record.id,

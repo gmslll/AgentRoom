@@ -124,6 +124,47 @@ describeWithPostgres("PostgresRoomRepository", () => {
     await second.close();
   });
 
+  it("reserves PostgreSQL attachment quota with bigint-safe parameters", async () => {
+    const app = await buildApp({
+      databaseUrl: databaseUrl!,
+      files: {
+        enabled: false,
+        maxSizeBytes: 10,
+        roomQuotaBytes: 10,
+        scanResult: "clean",
+        uploadUrlTtlSeconds: 300,
+      },
+    });
+    await app.ready();
+    const created = (
+      await app.inject({
+        method: "POST",
+        url: "/v1/rooms",
+        payload: { displayName: "Owner" },
+      })
+    ).json();
+    const uploadIntent = (size: number, name: string) =>
+      app.inject({
+        method: "POST",
+        url: `/v1/rooms/${created.room.id}/files/upload-intents`,
+        headers: { authorization: `Bearer ${created.accessToken}` },
+        payload: {
+          name,
+          mediaType: "application/octet-stream",
+          size,
+          sha256: "ab".repeat(32),
+        },
+      });
+
+    const accepted = await uploadIntent(6, "first.bin");
+    const overQuota = await uploadIntent(5, "second.bin");
+
+    expect(accepted.statusCode).toBe(201);
+    expect(overQuota.statusCode).toBe(413);
+    expect(overQuota.json().error.code).toBe("ROOM_FILE_QUOTA_EXCEEDED");
+    await app.close();
+  });
+
   it("persists public discovery and atomically revokes a dissolved room", async () => {
     const app = await buildApp({ databaseUrl: databaseUrl! });
     await app.ready();
