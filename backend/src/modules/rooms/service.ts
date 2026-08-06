@@ -15,6 +15,7 @@ import type {
   RoomConnectorInfo,
   RoomMember,
   RoomMessage,
+  RoomVisibility,
 } from "./types.js";
 import type { UserAccount } from "../auth/types.js";
 
@@ -22,11 +23,12 @@ export interface CreateRoomInput {
   name: string;
   displayName: string;
   ownerUserId: string | null;
+  visibility?: RoomVisibility;
 }
 
 export interface JoinRoomInput {
   roomId: string;
-  inviteCode: string;
+  inviteCode?: string;
   displayName: string;
   actorType: ActorType;
   agentProvider: AgentProvider | null;
@@ -122,6 +124,7 @@ export class RoomService {
     const room: Room = {
       id: createId("room"),
       name: input.name,
+      visibility: input.visibility ?? "private",
       createdAt,
     };
     const owner: RoomMember = {
@@ -158,13 +161,20 @@ export class RoomService {
   async joinRoom(input: JoinRoomInput): Promise<RoomAccess> {
     const room = await this.requireRoom(input.roomId);
     this.validateAgentProvider(input.actorType, input.agentProvider);
-    const inviteMatches = await this.repository.inviteCodeMatches(
-      input.roomId,
-      hashSecret(input.inviteCode),
-    );
-
-    if (!inviteMatches) {
-      throw new AppError(403, "INVALID_INVITE", "The invite code is invalid");
+    if (room.visibility === "private") {
+      const inviteMatches = input.inviteCode
+        ? await this.repository.inviteCodeMatches(
+            input.roomId,
+            hashSecret(input.inviteCode),
+          )
+        : false;
+      if (!inviteMatches) {
+        throw new AppError(
+          403,
+          "INVALID_INVITE",
+          "A valid invite code is required for this private room",
+        );
+      }
     }
 
     const member: RoomMember = {
@@ -214,6 +224,67 @@ export class RoomService {
 
   async listRoomsForUser(userId: string): Promise<AccountRoomMembership[]> {
     return this.repository.listRoomsForUser(userId);
+  }
+
+  async listPublicRooms(limit: number): Promise<Room[]> {
+    return this.repository.listPublicRooms(limit);
+  }
+
+  async updateRoom(input: {
+    roomId: string;
+    accessToken: string;
+    name?: string;
+    visibility?: RoomVisibility;
+  }): Promise<Room> {
+    await this.requireOwner(input.roomId, input.accessToken);
+    if (input.name === undefined && input.visibility === undefined) {
+      throw new AppError(
+        400,
+        "EMPTY_ROOM_UPDATE",
+        "At least one room setting must be provided",
+      );
+    }
+    const room = await this.repository.updateRoom(input.roomId, {
+      ...(input.name !== undefined ? { name: input.name } : {}),
+      ...(input.visibility !== undefined
+        ? { visibility: input.visibility }
+        : {}),
+    });
+    if (!room) {
+      throw new AppError(404, "ROOM_NOT_FOUND", "Room not found");
+    }
+    this.#publish({
+      version: 1,
+      eventId: createId("evt"),
+      type: "room.updated",
+      roomId: room.id,
+      occurredAt: this.now().toISOString(),
+      data: { room },
+    });
+    return room;
+  }
+
+  async dissolveRoom(input: {
+    roomId: string;
+    accessToken: string;
+  }): Promise<void> {
+    const owner = await this.requireOwner(input.roomId, input.accessToken);
+    const occurredAt = this.now().toISOString();
+    const dissolved = await this.repository.dissolveRoom(
+      input.roomId,
+      occurredAt,
+    );
+    if (!dissolved) {
+      throw new AppError(404, "ROOM_NOT_FOUND", "Room not found");
+    }
+    this.#publish({
+      version: 1,
+      eventId: createId("evt"),
+      type: "room.dissolved",
+      roomId: input.roomId,
+      occurredAt,
+      data: { dissolvedByMemberId: owner.id },
+    });
   }
 
   async sendMessage(input: SendMessageInput): Promise<SendMessageResult> {
@@ -725,7 +796,7 @@ export class RoomService {
       throw new AppError(
         403,
         "OWNER_REQUIRED",
-        "Only the room owner can manage room connection credentials",
+        "Only the room owner can manage this room",
       );
     }
     return member;

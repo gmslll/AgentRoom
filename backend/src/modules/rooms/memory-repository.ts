@@ -25,6 +25,7 @@ interface StoredRoom {
   room: Room;
   inviteCodeHash: string;
   nextSequence: number;
+  dissolvedAt?: string;
 }
 
 export class InMemoryRoomRepository implements RoomRepository {
@@ -59,14 +60,67 @@ export class InMemoryRoomRepository implements RoomRepository {
   }
 
   async findRoom(roomId: string): Promise<Room | undefined> {
-    return this.#rooms.get(roomId)?.room;
+    const stored = this.#rooms.get(roomId);
+    return stored && !stored.dissolvedAt ? stored.room : undefined;
+  }
+
+  async listPublicRooms(limit: number): Promise<Room[]> {
+    return [...this.#rooms.values()]
+      .filter(
+        (stored) =>
+          !stored.dissolvedAt && stored.room.visibility === "public",
+      )
+      .map((stored) => stored.room)
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+      .slice(0, limit);
+  }
+
+  async updateRoom(
+    roomId: string,
+    patch: { name?: string; visibility?: Room["visibility"] },
+  ): Promise<Room | undefined> {
+    const stored = this.#rooms.get(roomId);
+    if (!stored || stored.dissolvedAt) {
+      return undefined;
+    }
+    stored.room = { ...stored.room, ...patch };
+    return stored.room;
+  }
+
+  async dissolveRoom(roomId: string, at: string): Promise<boolean> {
+    const stored = this.#rooms.get(roomId);
+    if (!stored || stored.dissolvedAt) {
+      return false;
+    }
+    stored.dissolvedAt = at;
+    for (const member of this.#members.values()) {
+      if (member.roomId === roomId) {
+        this.#removedMembers.add(member.id);
+      }
+    }
+    for (const key of this.#tokenIndex.keys()) {
+      if (key.startsWith(`${roomId}:`)) {
+        this.#tokenIndex.delete(key);
+      }
+    }
+    for (const key of this.#userIndex.keys()) {
+      if (key.startsWith(`${roomId}:`)) {
+        this.#userIndex.delete(key);
+      }
+    }
+    return true;
   }
 
   async inviteCodeMatches(
     roomId: string,
     inviteCodeHash: string,
   ): Promise<boolean> {
-    return this.#rooms.get(roomId)?.inviteCodeHash === inviteCodeHash;
+    const stored = this.#rooms.get(roomId);
+    return Boolean(
+      stored &&
+        !stored.dissolvedAt &&
+        stored.inviteCodeHash === inviteCodeHash,
+    );
   }
 
   async updateInviteCode(
@@ -74,13 +128,17 @@ export class InMemoryRoomRepository implements RoomRepository {
     inviteCodeHash: string,
   ): Promise<void> {
     const storedRoom = this.#rooms.get(roomId);
-    if (!storedRoom) {
+    if (!storedRoom || storedRoom.dissolvedAt) {
       throw new AppError(404, "ROOM_NOT_FOUND", "Room not found");
     }
     storedRoom.inviteCodeHash = inviteCodeHash;
   }
 
   async addMember(record: AddMemberRecord): Promise<void> {
+    const storedRoom = this.#rooms.get(record.member.roomId);
+    if (!storedRoom || storedRoom.dissolvedAt) {
+      throw new AppError(404, "ROOM_NOT_FOUND", "Room not found");
+    }
     if (
       record.userId &&
       this.#userIndex.has(this.#userKey(record.member.roomId, record.userId))
@@ -111,8 +169,14 @@ export class InMemoryRoomRepository implements RoomRepository {
         continue;
       }
       const member = this.#members.get(memberId);
-      const room = member ? this.#rooms.get(member.roomId)?.room : undefined;
-      if (member && room && !this.#removedMembers.has(member.id)) {
+      const storedRoom = member ? this.#rooms.get(member.roomId) : undefined;
+      const room = storedRoom?.room;
+      if (
+        member &&
+        room &&
+        !storedRoom?.dissolvedAt &&
+        !this.#removedMembers.has(member.id)
+      ) {
         memberships.push({ room, member });
       }
     }
@@ -135,7 +199,9 @@ export class InMemoryRoomRepository implements RoomRepository {
     memberId: string,
   ): Promise<RoomMember | undefined> {
     const member = this.#members.get(memberId);
-    return member?.roomId === roomId ? member : undefined;
+    return member?.roomId === roomId && !this.#removedMembers.has(memberId)
+      ? member
+      : undefined;
   }
 
   async isActiveMember(roomId: string, memberId: string): Promise<boolean> {
@@ -143,6 +209,7 @@ export class InMemoryRoomRepository implements RoomRepository {
     return (
       !!member &&
       member.roomId === roomId &&
+      !this.#rooms.get(roomId)?.dissolvedAt &&
       !this.#removedMembers.has(memberId)
     );
   }
@@ -241,7 +308,7 @@ export class InMemoryRoomRepository implements RoomRepository {
 
   #appendMessage(record: AppendMessageRecord): RoomMessage {
     const storedRoom = this.#rooms.get(record.roomId);
-    if (!storedRoom) {
+    if (!storedRoom || storedRoom.dissolvedAt) {
       throw new AppError(404, "ROOM_NOT_FOUND", "Room not found");
     }
 

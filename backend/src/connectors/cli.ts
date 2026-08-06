@@ -58,7 +58,7 @@ declare const __AGENTROOM_CLI_DOWNLOAD_BASE__: string;
 const cliVersion =
   typeof __AGENTROOM_CLI_VERSION__ === "string"
     ? __AGENTROOM_CLI_VERSION__
-    : "0.3.0-dev";
+    : "0.4.0-dev";
 const cliDownloadBase =
   typeof __AGENTROOM_CLI_DOWNLOAD_BASE__ === "string"
     ? __AGENTROOM_CLI_DOWNLOAD_BASE__
@@ -106,9 +106,18 @@ async function joinRoom(args: string[], attach: boolean): Promise<void> {
     }
   };
   try {
+    const publicJoin = args.includes("--public");
+    const inviteOption = option(args, "--invite");
+    if (publicJoin && inviteOption) {
+      throw new Error("--public and --invite cannot be used together");
+    }
     const inviteCode =
-      option(args, "--invite") ??
-      (await requiredPrompt(prompt, "Room invite code: "));
+      inviteOption ??
+      (publicJoin
+        ? undefined
+        : ((await prompt.question(
+            "Room invite code (leave blank for a public room): ",
+          )).trim() || undefined));
     const provider = parseProvider(
       option(args, "--provider") ??
         (await requiredPrompt(prompt, "Provider (claude/codex): ")),
@@ -151,7 +160,7 @@ async function joinRoom(args: string[], attach: boolean): Promise<void> {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          inviteCode,
+          ...(inviteCode ? { inviteCode } : {}),
           displayName,
           actorType: "agent",
           agentProvider: provider,
@@ -1031,11 +1040,11 @@ function printUsage(): void {
   console.log(`AgentRoom bridge CLI
 
 Usage:
-  agentroom join <room-id> [--invite CODE] [--provider claude|codex]
+  agentroom join <room-id> [--public | --invite CODE] [--provider claude|codex]
                  [--name NAME] [--base-url URL] [--workspace PATH]
                  [--credential-store file|keychain] [--no-launch]
                  [--manual-start]
-  agentroom attach <room-id> [--invite CODE] [--provider claude|codex]
+  agentroom attach <room-id> [--public | --invite CODE] [--provider claude|codex]
                    [--session last|ID|NAME] [--name NAME]
                    [--base-url URL] [--workspace PATH]
                    [--credential-store file|keychain] [--no-launch]

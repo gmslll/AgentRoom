@@ -57,8 +57,8 @@ AgentRoom 是一个允许人类、本地终端和 AI Agent 共同参与的网页
 
 这些规则会直接影响 UI 和交互设计：
 
-- 房间 ID 只是公开路由信息，不是密码；访问房间仍然需要账号成员身份、成员令牌
-  或邀请码。
+- 房间 ID 只是公开路由信息，不是密码。私有房间加入需要邀请码；公开房间可以被发现
+  并免邀请码加入。加入后，消息、文件和实时连接仍然必须使用账号成员身份或成员令牌。
 - 普通 `text` 消息只进入聊天记录，绝不会自动唤醒 AI。
 - 只有明确的 `agent.task` 才会触发 AI，并且必须选择具体 agent 成员。
 - 当前只有房间 owner 可以触发 agent，避免加入房间的人随意控制别人的本地终端。
@@ -75,7 +75,7 @@ AgentRoom 是一个允许人类、本地终端和 AI Agent 共同参与的网页
 
 ### 当前 MVP 边界
 
-当前后端已经完成账号、房间、成员、文字消息、附件协议、AI 任务投递、成员移除、
+当前后端已经完成账号、房间公开/私有与解散、成员、文字消息、附件协议、AI 任务投递、成员移除、
 presence、房间审核规则、Claude/Codex Bridge、PostgreSQL 持久化，以及可选的 Redis、
 S3、SMTP、OAuth 和远程 MCP 接入。文件字节直传 S3 兼容对象存储；前端可以实现附件
 流程，但上线开关应等生产环境完成对象存储和 CORS 配置。邮件、OAuth、审核和远程
@@ -288,6 +288,7 @@ Authorization: Bearer ars_xxx
       "room": {
         "id": "room_xxx",
         "name": "Agent storm",
+        "visibility": "private",
         "createdAt": "2026-08-05T00:00:00.000Z"
       },
       "member": {
@@ -313,7 +314,7 @@ POST /v1/rooms
 Authorization: Bearer ars_xxx
 Content-Type: application/json
 
-{ "name": "Agent storm" }
+{ "name": "Agent storm", "visibility": "private" }
 ```
 
 返回 `201`，包含：
@@ -329,6 +330,9 @@ Content-Type: application/json
 
 `inviteCode` 和 `accessToken` 都是敏感值，不要写日志。只有 owner 页面应该展示
 邀请能力和重新生成按钮。
+
+`visibility` 默认为 `private`。创建页可以让 owner 直接选择 `public`；公开房间会进入
+`GET /v1/public-rooms` 目录。
 
 ### 通过邀请码加入
 
@@ -351,6 +355,29 @@ Content-Type: application/json
 `409 ACCOUNT_ALREADY_MEMBER`。AI 和终端通过 CLI/Bridge 加入，不需要前端替它们
 调用接口。
 
+公开房间的人类、AI 和终端加入都可以省略 `inviteCode`：
+
+```http
+GET /v1/public-rooms
+
+POST /v1/rooms/{roomId}/members
+Authorization: Bearer ars_xxx
+Content-Type: application/json
+
+{ "displayName": "Alice", "actorType": "human" }
+```
+
+CLI 交互加入公开房间时邀请码直接留空；非交互脚本使用
+`agentroom join <roomId> --public ...`，避免等待输入。
+
+### 房间治理
+
+- `PATCH /v1/rooms/{roomId}`：仅 owner 可改名或切换 `visibility`，请求体至少包含
+  `name`、`visibility` 之一。
+- `DELETE /v1/rooms/{roomId}`：仅 owner 可解散。后端软删除房间并立即吊销全部成员
+  令牌；前端收到 `room.dissolved` 后返回房间列表。
+- 公开转私有只影响后续加入，已有成员不会被移除；需要移除时使用成员踢出接口。
+
 ### 成员与邀请码
 
 - `GET /v1/rooms/{roomId}/members`：获取成员列表。发送 AI 任务时使用这里的
@@ -358,7 +385,8 @@ Content-Type: application/json
 - `DELETE /v1/rooms/{roomId}/members/{memberId}`：owner 移除成员并立即撤销其成员
   令牌；owner 自己不能被移除。成功后从列表移除该成员并处理 `member.removed`。
 - `GET /v1/rooms/{roomId}/presence`：返回 `{ items: MemberPresence[] }`。进入房间时先
-  拉一次，之后合并 `member.presence` 事件；`lastSeenAt: null` 表示尚无可用记录。
+  拉一次，之后合并 `member.presence` 事件，并建议每 30 秒校准快照以覆盖进程异常退出
+  后的 TTL 过期；`lastSeenAt: null` 表示尚无可用记录。
 - `POST /v1/rooms/{roomId}/invite-code/rotate`：仅 owner 可用；旧邀请码立即失效，
   返回新 `inviteCode` 和 `connectorCommand`。
 
@@ -601,6 +629,8 @@ async function connectRoomRealtime(roomId: string, accountToken: string) {
 | `member.joined` | 更新成员列表 |
 | `member.removed` | 移除成员；如果是当前成员则关闭房间会话并返回列表 |
 | `member.presence` | 合并 `online` 和 `lastSeenAt`，作为唯一在线状态来源 |
+| `room.updated` | 刷新房间名称和公开/私有标识 |
+| `room.dissolved` | 清空当前房间状态、关闭连接并返回房间列表 |
 | `message.created` | 按 message ID 去重后加入消息列表 |
 | `delivery.updated` | 更新 AI 任务状态 |
 | `delivery.queued` | 只发给目标 AI，普通人类客户端通常不会收到 |
@@ -648,10 +678,10 @@ async function connectRoomRealtime(roomId: string, accountToken: string) {
 
 1. 注册、登录、启动时 `/auth/me` 恢复登录态、退出。
 2. 我的聊天室列表。
-3. 创建房间、邀请码展示与加入房间。
+3. 创建房间、公开目录、邀请码展示与加入房间。
 4. 房间历史消息与普通文字发送。
 5. WebSocket 实时消息和断线补偿。
-6. 成员列表、presence、成员移除与 AI 在线接入展示。
+6. 房间设置/解散、成员列表、presence、成员移除与 AI 在线接入展示。
 7. owner 选择 agent 并发送 `agent.task`，按 session-card 语义展示 delivery 状态。
 8. 文件直传、附件消息和短期下载 URL。
 9. 邮箱验证、密码恢复/修改；OAuth 和审核按生产开关接入。

@@ -63,6 +63,119 @@ async function joinAgent(
 }
 
 describe("room management extensions", () => {
+  it("lets only the owner publish and rename a room, then allows invite-free joins", async () => {
+    const app = await makeApp();
+    const owner = await registerOwner(app);
+    const room = await createRoom(app, owner.accessToken);
+    const agent = await joinAgent(app, room.room.id, room.inviteCode, "Claude A");
+
+    const forbidden = await app.inject({
+      method: "PATCH",
+      url: `/v1/rooms/${room.room.id}`,
+      headers: { authorization: `Bearer ${agent.accessToken}` },
+      payload: { visibility: "public" },
+    });
+    expect(forbidden.statusCode).toBe(403);
+    expect(forbidden.json().error.code).toBe("OWNER_REQUIRED");
+
+    const emptyUpdate = await app.inject({
+      method: "PATCH",
+      url: `/v1/rooms/${room.room.id}`,
+      headers: { authorization: `Bearer ${owner.accessToken}` },
+      payload: {},
+    });
+    expect(emptyUpdate.statusCode).toBe(400);
+
+    const published = await app.inject({
+      method: "PATCH",
+      url: `/v1/rooms/${room.room.id}`,
+      headers: { authorization: `Bearer ${owner.accessToken}` },
+      payload: { name: "Public collaboration", visibility: "public" },
+    });
+    expect(published.statusCode).toBe(200);
+    expect(published.json().room).toMatchObject({
+      name: "Public collaboration",
+      visibility: "public",
+    });
+
+    const directory = await app.inject({
+      method: "GET",
+      url: "/v1/public-rooms",
+    });
+    expect(directory.statusCode).toBe(200);
+    expect(directory.json().items).toEqual([
+      expect.objectContaining({ id: room.room.id, visibility: "public" }),
+    ]);
+
+    const guest = await app.inject({
+      method: "POST",
+      url: `/v1/rooms/${room.room.id}/members`,
+      payload: { displayName: "Public guest", actorType: "human" },
+    });
+    expect(guest.statusCode).toBe(201);
+    expect(guest.json().room.visibility).toBe("public");
+
+    const privatized = await app.inject({
+      method: "PATCH",
+      url: `/v1/rooms/${room.room.id}`,
+      headers: { authorization: `Bearer ${owner.accessToken}` },
+      payload: { visibility: "private" },
+    });
+    expect(privatized.statusCode).toBe(200);
+
+    const missingInvite = await app.inject({
+      method: "POST",
+      url: `/v1/rooms/${room.room.id}/members`,
+      payload: { displayName: "Blocked guest", actorType: "human" },
+    });
+    expect(missingInvite.statusCode).toBe(403);
+    expect(missingInvite.json().error.code).toBe("INVALID_INVITE");
+  });
+
+  it("dissolves a room, revokes every member, and removes it from listings", async () => {
+    const app = await makeApp();
+    const owner = await registerOwner(app);
+    const room = await createRoom(app, owner.accessToken);
+    const agent = await joinAgent(app, room.room.id, room.inviteCode, "Claude A");
+
+    await app.inject({
+      method: "PATCH",
+      url: `/v1/rooms/${room.room.id}`,
+      headers: { authorization: `Bearer ${owner.accessToken}` },
+      payload: { visibility: "public" },
+    });
+
+    const dissolved = await app.inject({
+      method: "DELETE",
+      url: `/v1/rooms/${room.room.id}`,
+      headers: { authorization: `Bearer ${owner.accessToken}` },
+    });
+    expect(dissolved.statusCode).toBe(204);
+
+    for (const accessToken of [owner.accessToken, agent.accessToken]) {
+      const inaccessible = await app.inject({
+        method: "GET",
+        url: `/v1/rooms/${room.room.id}/messages`,
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+      expect(inaccessible.statusCode).toBe(404);
+      expect(inaccessible.json().error.code).toBe("ROOM_NOT_FOUND");
+    }
+
+    const accountRooms = await app.inject({
+      method: "GET",
+      url: "/v1/rooms",
+      headers: { authorization: `Bearer ${owner.accessToken}` },
+    });
+    expect(accountRooms.json().items).toEqual([]);
+
+    const publicRooms = await app.inject({
+      method: "GET",
+      url: "/v1/public-rooms",
+    });
+    expect(publicRooms.json().items).toEqual([]);
+  });
+
   it("lets the owner remove a member and revokes their token", async () => {
     const app = await makeApp();
     const owner = await registerOwner(app);

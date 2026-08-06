@@ -15,6 +15,8 @@ import type { PendingAgentDelivery } from "../../src/protocol/rooms.js";
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   await Promise.all(
     temporaryDirectories.splice(0).map((path) =>
       rm(path, { recursive: true, force: true }),
@@ -63,6 +65,42 @@ describe("bridge lifecycle", () => {
     await expect(client.listen(() => undefined, controller.signal)).resolves.toBe(
       undefined,
     );
+  });
+
+  it("does not reconnect after the membership is revoked", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          error: {
+            code: "ROOM_NOT_FOUND",
+            message: "Room not found",
+          },
+        }),
+        {
+          status: 404,
+          headers: { "content-type": "application/json" },
+        },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const controller = new AbortController();
+    const client = new AgentRoomClient({
+      baseUrl: "http://127.0.0.1:8787",
+      roomId: "room_12345678",
+      accessToken: "art_12345678",
+      httpTimeoutMs: 100,
+      socketConnectTimeoutMs: 100,
+      recoveryIntervalMs: 100,
+    });
+
+    const listening = client.listen(() => undefined, controller.signal);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    controller.abort();
+    await expect(listening).resolves.toBe(undefined);
   });
 
   it("rejects a missing Codex executable without crashing the process", async () => {

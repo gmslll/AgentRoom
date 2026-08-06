@@ -13,6 +13,7 @@
 export type ActorType = "human" | "agent" | "terminal";
 export type AgentProvider = "claude" | "codex" | "other" | null;
 export type MemberRole = "owner" | "member";
+export type RoomVisibility = "private" | "public";
 export type MessageKind = "text" | "agent.task" | "agent.reply";
 export type DeliveryStatus =
   | "queued"
@@ -56,6 +57,7 @@ export interface LoginInput {
 export interface Room {
   id: string;
   name: string;
+  visibility: RoomVisibility;
   createdAt: string;
 }
 
@@ -67,6 +69,12 @@ export interface Member {
   agentProvider: AgentProvider;
   role: MemberRole;
   joinedAt: string;
+}
+
+export interface MemberPresence {
+  memberId: string;
+  online: boolean;
+  lastSeenAt: string | null;
 }
 
 export interface AccountRoomMembership {
@@ -87,9 +95,14 @@ export interface CreatedRoomAccess extends RoomAccess {
 }
 
 export interface JoinRoomInput {
-  inviteCode: string;
+  inviteCode?: string;
   displayName: string;
   actorType: ActorType;
+}
+
+export interface UpdateRoomInput {
+  name?: string;
+  visibility?: RoomVisibility;
 }
 
 export interface RoomConnectorInfo {
@@ -214,15 +227,19 @@ export interface MemberRemovedEvent {
   data: { memberId: string };
 }
 
-export interface MemberPresence {
-  memberId: string;
-  online: boolean;
-  lastSeenAt: string | null;
-}
-
 export interface MemberPresenceEvent {
   type: "member.presence";
-  data: { memberId: string; online: boolean; lastSeenAt: string | null };
+  data: MemberPresence;
+}
+
+export interface RoomUpdatedEvent {
+  type: "room.updated";
+  data: { room: Room };
+}
+
+export interface RoomDissolvedEvent {
+  type: "room.dissolved";
+  data: { dissolvedByMemberId: string };
 }
 
 export interface MessageCreatedEvent {
@@ -245,6 +262,8 @@ export type RealtimeEvent =
   | MemberJoinedEvent
   | MemberRemovedEvent
   | MemberPresenceEvent
+  | RoomUpdatedEvent
+  | RoomDissolvedEvent
   | MessageCreatedEvent
   | DeliveryQueuedEvent
   | DeliveryUpdatedEvent;

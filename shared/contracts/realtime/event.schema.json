@@ -7,6 +7,8 @@
     { "$ref": "#/$defs/memberJoined" },
     { "$ref": "#/$defs/memberRemoved" },
     { "$ref": "#/$defs/memberPresence" },
+    { "$ref": "#/$defs/roomUpdated" },
+    { "$ref": "#/$defs/roomDissolved" },
     { "$ref": "#/$defs/messageCreated" },
     { "$ref": "#/$defs/deliveryQueued" },
     { "$ref": "#/$defs/deliveryUpdated" }
@@ -40,6 +42,17 @@
         "agentProvider": { "$ref": "#/$defs/agentProvider" },
         "role": { "type": "string", "enum": ["owner", "member"] },
         "joinedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "room": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "visibility", "createdAt"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "visibility": { "type": "string", "enum": ["private", "public"] },
+        "createdAt": { "type": "string", "format": "date-time" }
       }
     },
     "author": {
@@ -261,6 +274,54 @@
               "required": ["delivery"],
               "properties": {
                 "delivery": { "$ref": "#/$defs/delivery" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "roomUpdated": {
+      "allOf": [
+        { "$ref": "#/$defs/baseEvent" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["version", "eventId", "type", "roomId", "occurredAt", "data"],
+          "properties": {
+            "version": { "const": 1 },
+            "eventId": { "type": "string" },
+            "type": { "const": "room.updated" },
+            "roomId": { "type": "string" },
+            "occurredAt": { "type": "string", "format": "date-time" },
+            "data": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["room"],
+              "properties": { "room": { "$ref": "#/$defs/room" } }
+            }
+          }
+        }
+      ]
+    },
+    "roomDissolved": {
+      "allOf": [
+        { "$ref": "#/$defs/baseEvent" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["version", "eventId", "type", "roomId", "occurredAt", "data"],
+          "properties": {
+            "version": { "const": 1 },
+            "eventId": { "type": "string" },
+            "type": { "const": "room.dissolved" },
+            "roomId": { "type": "string" },
+            "occurredAt": { "type": "string", "format": "date-time" },
+            "data": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["dissolvedByMemberId"],
+              "properties": {
+                "dissolvedByMemberId": { "type": "string" }
               }
             }
           }

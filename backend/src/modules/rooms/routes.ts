@@ -24,13 +24,18 @@ const CreateRoomBody = Type.Object(
     displayName: Type.Optional(
       Type.String({ minLength: 1, maxLength: 64, pattern: "\\S" }),
     ),
+    visibility: Type.Optional(
+      Type.Union([Type.Literal("private"), Type.Literal("public")]),
+    ),
   },
   { additionalProperties: false },
 );
 
 const JoinRoomBody = Type.Object(
   {
-    inviteCode: Type.String({ minLength: 8, maxLength: 100 }),
+    inviteCode: Type.Optional(
+      Type.String({ minLength: 8, maxLength: 100 }),
+    ),
     displayName: Type.String({ minLength: 1, maxLength: 64, pattern: "\\S" }),
     actorType: Type.Union([
       Type.Literal("human"),
@@ -151,6 +156,27 @@ const ListMessagesQuery = Type.Object(
   { additionalProperties: false },
 );
 
+const ListPublicRoomsQuery = Type.Object(
+  {
+    limit: Type.Optional(
+      Type.Integer({ minimum: 1, maximum: 100, default: 50 }),
+    ),
+  },
+  { additionalProperties: false },
+);
+
+const UpdateRoomBody = Type.Object(
+  {
+    name: Type.Optional(
+      Type.String({ minLength: 1, maxLength: 100, pattern: "\\S" }),
+    ),
+    visibility: Type.Optional(
+      Type.Union([Type.Literal("private"), Type.Literal("public")]),
+    ),
+  },
+  { additionalProperties: false, minProperties: 1 },
+);
+
 export function registerRoomRoutes(
   app: FastifyInstance,
   roomService: RoomService,
@@ -163,6 +189,14 @@ export function registerRoomRoutes(
     );
     return { items: await roomService.listRoomsForUser(user.id) };
   });
+
+  app.get<{ Querystring: Static<typeof ListPublicRoomsQuery> }>(
+    "/v1/public-rooms",
+    { schema: { querystring: ListPublicRoomsQuery } },
+    async (request) => ({
+      items: await roomService.listPublicRooms(request.query.limit ?? 50),
+    }),
+  );
 
   app.post<{ Body: Static<typeof CreateRoomBody> }>(
     "/v1/rooms",
@@ -185,8 +219,41 @@ export function registerRoomRoutes(
         name: request.body.name ?? "Untitled room",
         displayName,
         ownerUserId: user?.id ?? null,
+        visibility: request.body.visibility ?? "private",
       });
       return reply.status(201).send(result);
+    },
+  );
+
+  app.patch<{
+    Params: Static<typeof RoomParams>;
+    Body: Static<typeof UpdateRoomBody>;
+  }>(
+    "/v1/rooms/:roomId",
+    { schema: { params: RoomParams, body: UpdateRoomBody } },
+    async (request) => ({
+      room: await roomService.updateRoom({
+        roomId: request.params.roomId,
+        accessToken: readBearerToken(request.headers.authorization),
+        ...(request.body.name !== undefined
+          ? { name: request.body.name }
+          : {}),
+        ...(request.body.visibility !== undefined
+          ? { visibility: request.body.visibility }
+          : {}),
+      }),
+    }),
+  );
+
+  app.delete<{ Params: Static<typeof RoomParams> }>(
+    "/v1/rooms/:roomId",
+    { schema: { params: RoomParams } },
+    async (request, reply) => {
+      await roomService.dissolveRoom({
+        roomId: request.params.roomId,
+        accessToken: readBearerToken(request.headers.authorization),
+      });
+      return reply.status(204).send();
     },
   );
 
@@ -205,7 +272,9 @@ export function registerRoomRoutes(
           : undefined;
       const result = await roomService.joinRoom({
         roomId: request.params.roomId,
-        inviteCode: request.body.inviteCode,
+        ...(request.body.inviteCode
+          ? { inviteCode: request.body.inviteCode }
+          : {}),
         displayName: request.body.displayName,
         actorType: request.body.actorType,
         agentProvider: request.body.agentProvider ?? null,

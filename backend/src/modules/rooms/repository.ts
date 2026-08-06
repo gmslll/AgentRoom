@@ -83,6 +83,13 @@ export interface RoomRepository {
   healthCheck?(): Promise<void>;
   createRoom(record: CreateRoomRecord): Promise<void>;
   findRoom(roomId: string): Promise<Room | undefined>;
+  listPublicRooms(limit: number): Promise<Room[]>;
+  updateRoom(
+    roomId: string,
+    patch: { name?: string; visibility?: Room["visibility"] },
+  ): Promise<Room | undefined>;
+  /** Soft-deletes a room and revokes every membership token. */
+  dissolveRoom(roomId: string, at: string): Promise<boolean>;
   inviteCodeMatches(roomId: string, inviteCodeHash: string): Promise<boolean>;
   updateInviteCode(roomId: string, inviteCodeHash: string): Promise<void>;
   addMember(record: AddMemberRecord): Promise<void>;

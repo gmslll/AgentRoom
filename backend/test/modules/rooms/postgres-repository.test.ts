@@ -124,6 +124,83 @@ describeWithPostgres("PostgresRoomRepository", () => {
     await second.close();
   });
 
+  it("persists public discovery and atomically revokes a dissolved room", async () => {
+    const app = await buildApp({ databaseUrl: databaseUrl! });
+    await app.ready();
+    const owner = (
+      await app.inject({
+        method: "POST",
+        url: "/v1/auth/register",
+        payload: {
+          email: "governance-owner@example.com",
+          displayName: "Owner",
+          password: "correct horse battery staple",
+        },
+      })
+    ).json();
+    const guest = (
+      await app.inject({
+        method: "POST",
+        url: "/v1/auth/register",
+        payload: {
+          email: "governance-guest@example.com",
+          displayName: "Guest",
+          password: "correct horse battery staple",
+        },
+      })
+    ).json();
+    const created = (
+      await app.inject({
+        method: "POST",
+        url: "/v1/rooms",
+        headers: { authorization: `Bearer ${owner.accessToken}` },
+        payload: { name: "Public PostgreSQL room", visibility: "public" },
+      })
+    ).json();
+
+    const publicRooms = await app.inject({
+      method: "GET",
+      url: "/v1/public-rooms",
+    });
+    expect(publicRooms.json().items).toEqual([created.room]);
+
+    const joined = (
+      await app.inject({
+        method: "POST",
+        url: `/v1/rooms/${created.room.id}/members`,
+        headers: { authorization: `Bearer ${guest.accessToken}` },
+        payload: { displayName: "Guest", actorType: "human" },
+      })
+    ).json();
+    const dissolved = await app.inject({
+      method: "DELETE",
+      url: `/v1/rooms/${created.room.id}`,
+      headers: { authorization: `Bearer ${owner.accessToken}` },
+    });
+    expect(dissolved.statusCode).toBe(204);
+
+    const ownerRooms = await app.inject({
+      method: "GET",
+      url: "/v1/rooms",
+      headers: { authorization: `Bearer ${owner.accessToken}` },
+    });
+    const guestRooms = await app.inject({
+      method: "GET",
+      url: "/v1/rooms",
+      headers: { authorization: `Bearer ${guest.accessToken}` },
+    });
+    expect(ownerRooms.json().items).toEqual([]);
+    expect(guestRooms.json().items).toEqual([]);
+
+    const revoked = await app.inject({
+      method: "GET",
+      url: `/v1/rooms/${created.room.id}/messages`,
+      headers: { authorization: `Bearer ${joined.accessToken}` },
+    });
+    expect(revoked.statusCode).toBe(404);
+    await app.close();
+  });
+
   it("keeps task idempotency and replies atomic under database concurrency", async () => {
     const app = await buildApp({ databaseUrl: databaseUrl! });
     await app.ready();

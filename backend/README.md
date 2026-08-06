@@ -76,7 +76,10 @@ npm run build
 - `GET /v1/auth/oauth/{provider}/authorize` (google | github)
 - `GET /v1/auth/oauth/{provider}/callback`
 - `GET /v1/rooms` (rooms linked to the logged-in account)
+- `GET /v1/public-rooms` (discoverable rooms; no invite required to join)
 - `POST /v1/rooms`
+- `PATCH /v1/rooms/:roomId` (owner rename / public-private setting)
+- `DELETE /v1/rooms/:roomId` (owner dissolve, revokes all memberships)
 - `POST /v1/rooms/:roomId/members`
 - `GET /v1/rooms/:roomId/members`
 - `DELETE /v1/rooms/:roomId/members/:memberId` (owner kick, revokes token)
@@ -207,6 +210,14 @@ node dist/connectors/cli.js join room_replace_me \
   --provider codex \
   --name Codex \
   --workspace /absolute/path/to/project
+```
+
+公开聊天室无需邀请码：交互模式可直接留空，自动化脚本可显式传
+`--public`，例如：
+
+```bash
+agentroom join room_replace_me --public --provider codex --name Codex \
+  --base-url "https://try-status.online/api"
 ```
 
 The CLI exchanges the invite for a member token and writes that token to a

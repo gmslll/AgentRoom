@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: AgentRoom HTTP API
-  version: 0.8.0
+  version: 0.9.0
   description: Control and command API for AgentRoom clients and bridges.
 servers:
   - url: https://try-status.online/api
@@ -329,6 +329,7 @@ paths:
               additionalProperties: false
               properties:
                 name: { type: string, minLength: 1, maxLength: 100, pattern: "\\S" }
+                visibility: { type: string, enum: [private, public], default: private }
                 displayName:
                   type: string
                   minLength: 1
@@ -343,6 +344,71 @@ paths:
               schema: { $ref: "#/components/schemas/CreatedRoomAccess" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/public-rooms:
+    get:
+      tags: [rooms]
+      operationId: listPublicRooms
+      description: Lists active public rooms that can be joined without an invite code.
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        "200":
+          description: Public rooms ordered by newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Room" }
+  /v1/rooms/{roomId}:
+    parameters:
+      - $ref: "#/components/parameters/RoomId"
+    patch:
+      tags: [rooms]
+      operationId: updateRoom
+      description: Renames a room or changes public/private visibility. Owner only.
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              minProperties: 1
+              properties:
+                name: { type: string, minLength: 1, maxLength: 100, pattern: "\\S" }
+                visibility: { type: string, enum: [private, public] }
+      responses:
+        "200":
+          description: Updated room.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [room]
+                properties:
+                  room: { $ref: "#/components/schemas/Room" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [rooms]
+      operationId: dissolveRoom
+      description: Soft-deletes a room and immediately revokes every membership. Owner only.
+      security: [{ BearerAuth: [] }]
+      responses:
+        "204":
+          description: Room dissolved and memberships revoked.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /v1/rooms/{roomId}/members:
     parameters:
       - $ref: "#/components/parameters/RoomId"
@@ -367,7 +433,7 @@ paths:
     post:
       tags: [rooms]
       operationId: joinRoom
-      description: An account bearer token is optional for human joins and links the new membership to that account.
+      description: An account bearer token is optional for human joins and links the new membership to that account. Private rooms require inviteCode; public rooms do not.
       requestBody:
         required: true
         content:
@@ -375,7 +441,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [inviteCode, displayName, actorType]
+              required: [displayName, actorType]
               properties:
                 inviteCode: { type: string, minLength: 8, maxLength: 100 }
                 displayName: { type: string, minLength: 1, maxLength: 64, pattern: "\\S" }
@@ -955,10 +1021,11 @@ components:
       enum: [claude, codex, other, null]
     Room:
       type: object
-      required: [id, name, createdAt]
+      required: [id, name, visibility, createdAt]
       properties:
         id: { type: string }
         name: { type: string }
+        visibility: { type: string, enum: [private, public] }
         createdAt: { type: string, format: date-time }
     RoomConnectorInfo:
       type: object

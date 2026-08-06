@@ -108,6 +108,7 @@ describe("room messaging", () => {
     expect(createdResponse.statusCode).toBe(201);
     const created = createdResponse.json();
     expect(created.room.name).toBe("Build room");
+    expect(created.room.visibility).toBe("private");
     expect(created.member.actorType).toBe("human");
     expect(created.accessToken).toMatch(/^art_/);
     expect(created.inviteCode).toMatch(/^ari_/);
@@ -353,6 +354,17 @@ describe("realtime", () => {
       received.push(JSON.parse(data.toString()));
     });
 
+    await expect
+      .poll(async () => {
+        const response = await app.inject({
+          method: "GET",
+          url: `/v1/rooms/${created.room.id}/presence`,
+          headers: { authorization: `Bearer ${created.accessToken}` },
+        });
+        return response.json().items[0]?.online;
+      })
+      .toBe(true);
+
     const joined = (
       await app.inject({
         method: "POST",
@@ -388,6 +400,16 @@ describe("realtime", () => {
       }),
     );
     socket.terminate();
+    await expect
+      .poll(async () => {
+        const response = await app.inject({
+          method: "GET",
+          url: `/v1/rooms/${created.room.id}/presence`,
+          headers: { authorization: `Bearer ${created.accessToken}` },
+        });
+        return response.json().items[0]?.online;
+      })
+      .toBe(false);
   });
 });
 

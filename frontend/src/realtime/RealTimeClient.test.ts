@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { AgentDelivery, Member, Message } from "../api/types";
+import type { AgentDelivery, Member, Message, Room } from "../api/types";
 import { RealTimeClient } from "./RealTimeClient";
 
 /** Minimal fake WebSocket controllable from the test. */
@@ -80,6 +80,13 @@ const sampleDelivery: AgentDelivery = {
   updatedAt: "2026-08-05T00:00:00.000Z",
 };
 
+const sampleRoom: Room = {
+  id: "room_1",
+  name: "Public room",
+  visibility: "public",
+  createdAt: "2026-08-05T00:00:00.000Z",
+};
+
 function envelope(type: string, data: unknown) {
   return {
     version: 1,
@@ -98,6 +105,9 @@ function makeClient(overrides: { heartbeatMs?: number } = {}) {
     onMessageCreated: vi.fn(),
     onDeliveryUpdated: vi.fn(),
     onMemberRemoved: vi.fn(),
+    onMemberPresence: vi.fn(),
+    onRoomUpdated: vi.fn(),
+    onRoomDissolved: vi.fn(),
   };
   const getTicket = vi.fn().mockResolvedValue({
     ticket: "arrt_1",
@@ -149,6 +159,25 @@ describe("RealTimeClient", () => {
 
     ws.emit(envelope("member.removed", { memberId: "mem_9" }));
     expect(handlers.onMemberRemoved).toHaveBeenCalledWith("mem_9");
+
+    ws.emit(
+      envelope("member.presence", {
+        memberId: "mem_2",
+        online: true,
+        lastSeenAt: "2026-08-05T00:00:00.000Z",
+      }),
+    );
+    expect(handlers.onMemberPresence).toHaveBeenCalledWith({
+      memberId: "mem_2",
+      online: true,
+      lastSeenAt: "2026-08-05T00:00:00.000Z",
+    });
+
+    ws.emit(envelope("room.updated", { room: sampleRoom }));
+    expect(handlers.onRoomUpdated).toHaveBeenCalledWith(sampleRoom);
+
+    ws.emit(envelope("room.dissolved", { dissolvedByMemberId: "mem_1" }));
+    expect(handlers.onRoomDissolved).toHaveBeenCalledTimes(1);
 
     // delivery.queued targets the AI only; the human client ignores it.
     ws.emit(envelope("delivery.queued", { delivery: sampleDelivery }));
