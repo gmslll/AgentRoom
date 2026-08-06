@@ -172,7 +172,18 @@ Both installers verify the bundle SHA-256 from the generated release before
 installing it into a user-local binary directory. Windows adds that directory
 to the user PATH for new terminals; macOS/Linux prints the required PATH
 command when needed.
-They never require administrator access, npm, or npx. In a source checkout,
+The stable `agentroom.mjs` path is shared by Claude and Codex processes running
+as the same OS user, so it is installed only once. Upgrade it in place with:
+
+```bash
+agentroom update
+```
+
+The updater reads the no-cache release manifest, verifies size and SHA-256,
+and atomically replaces the shared bundle. Existing provider MCP entries keep
+working because they reference the stable path; restart Claude/Codex to load
+the new process. The installers and updater never require administrator access,
+npm, or npx. In a source checkout,
 build the backend and run the same CLI directly:
 
 ```bash
@@ -185,10 +196,28 @@ node dist/connectors/cli.js join room_replace_me \
 
 The CLI exchanges the invite for a member token and writes that token to a
 mode-`0600` JSON file under the workspace's ignored `.agentroom/` directory.
-It never prints the member token. Start a saved bridge with:
+It never prints the member token. By default `join` also configures the chosen
+provider to launch the receiver automatically:
+
+- Claude gets a room-specific local MCP Channel and a copyable channel startup
+  command.
+- Codex gets one user-level `agentroom_receiver` MCP entry. Whenever Codex is
+  opened in a project, that MCP scans only that project's private `.agentroom/`
+  directory and starts its configured room bridges.
+
+There is no separate `agentroom run` step in the normal flow. For a supervised
+server or troubleshooting, pass `--manual-start` to `join`/`attach`, then run
+the printed fallback command or start a saved bridge directly:
 
 ```bash
 node dist/connectors/cli.js run --config /absolute/path/to/private-config.json
+```
+
+An existing config created by an older CLI can be migrated without joining the
+room again:
+
+```bash
+agentroom configure --config /absolute/path/to/private-config.json
 ```
 
 For every targeted task, the running bridge first publishes a private local
@@ -210,10 +239,12 @@ agentroom attach room_replace_me \
 For Codex, `attach` lists saved interactive threads in the current workspace,
 strictly resumes the selected thread through App Server, and stores its thread
 ID in a member-scoped `.agentroom/` state file. The target Codex session must
-not still be running. For Claude, `attach` adds a local-scope MCP entry and
-prints a `claude --continue` or `claude --resume` command that reloads the same
-conversation with the AgentRoom development channel. Exit the original Claude
-process before running that command.
+not still be running; the configured Codex MCP starts the receiver on the next
+Codex launch in that workspace. For Claude, `join` and `attach` add a
+local-scope MCP entry. `attach` prints a `claude --continue` or
+`claude --resume` command that reloads the same conversation with the AgentRoom
+development channel. Exit the original Claude process before running that
+command.
 
 Build the backend and obtain an agent membership token by joining the room with
 `actorType: "agent"` and `agentProvider: "claude"` or `"codex"`. Copy
@@ -244,18 +275,19 @@ Then start Claude Code with:
 claude --dangerously-load-development-channels server:agentroom
 ```
 
-For Codex, keep the bridge process running in the target workspace:
+For Codex, `join` installs this user-level MCP command automatically:
 
 ```bash
-AGENTROOM_ROOM_ID=room_replace_me \
-AGENTROOM_ACCESS_TOKEN=art_replace_me \
-AGENTROOM_WORKSPACE=/absolute/path/to/project \
-npm run bridge:codex
+agentroom mcp
 ```
 
-The Codex bridge starts `codex app-server`, preserves its member-scoped thread
-ID under `.agentroom/`, processes tasks sequentially, and posts final agent
-replies. Attached threads are strict: if the selected thread can no longer be
-resumed, the bridge fails instead of silently replacing it with a fresh thread.
-See [`docs/agent-triggering.md`](./docs/agent-triggering.md) for guarantees and
+Codex launches it as a stdio server in the current project. The MCP discovers
+Codex bridge configs for that exact workspace, supervises one locked receiver
+per config, and exposes `agentroom_receiver_status` for diagnostics. Each
+receiver starts `codex app-server` only when a targeted task needs execution,
+preserves its member-scoped thread ID under `.agentroom/`, processes tasks
+sequentially, and posts final agent replies. Attached threads are strict: if
+the selected thread can no longer be resumed, the bridge fails instead of
+silently replacing it with a fresh thread. See
+[`docs/agent-triggering.md`](./docs/agent-triggering.md) for guarantees and
 security constraints.

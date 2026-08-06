@@ -44,6 +44,10 @@ await build({
   legalComments: "none",
   sourcemap: false,
   minify: false,
+  define: {
+    __AGENTROOM_CLI_VERSION__: JSON.stringify(version),
+    __AGENTROOM_CLI_DOWNLOAD_BASE__: JSON.stringify(downloadBase),
+  },
 });
 const temporaryBundle = await artifact(temporaryBundlePath);
 const bundleName =
@@ -197,6 +201,8 @@ install -m 0755 "\$TMP_DIR/agentroom" "\$BIN_DIR/agentroom"
 "\$BIN_DIR/agentroom" --help >/dev/null
 
 echo "AgentRoom CLI installed to \$BIN_DIR/agentroom"
+echo "Claude and Codex running as this OS user share this installation."
+echo "Update it later with: agentroom update"
 case ":\$PATH:" in
   *":\$BIN_DIR:"*) ;;
   *)
@@ -253,6 +259,8 @@ if ($PathEntries -notcontains $BinDir) {
 $env:Path = "$BinDir;$env:Path"
 & (Join-Path $BinDir "agentroom.cmd") --help | Out-Null
 Write-Host "AgentRoom CLI installed to $BinDir\\agentroom.cmd"
+Write-Host "Claude and Codex running as this Windows user share this installation."
+Write-Host "Update it later with: agentroom update"
 Write-Host "Open a new terminal, then run: agentroom --help"
 `;
 }

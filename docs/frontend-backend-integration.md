@@ -401,7 +401,8 @@ Authorization: Bearer ars_xxx
 
 1. 提示用户先安装 Node.js 22+，以及已经登录的 Claude Code 或 Codex CLI。
 2. 根据浏览器平台提供“下载 macOS/Linux 安装器”和“下载 Windows 安装器”；链接
-   必须直接使用 `connector.installers`，不要前端手拼。
+   必须直接使用 `connector.installers`，不要前端手拼。同一系统用户只需安装一次，
+   Claude/Codex 共用稳定的用户级全局 CLI；更新命令为 `agentroom update`。
 3. 安装完成后提示用户按安装器输出完成 PATH 配置，再在终端 `cd` 到希望 AI 操作的
    项目目录。
 4. 提供“新会话加入”和“已有会话加入”两个复制按钮，分别复制
@@ -410,18 +411,24 @@ Authorization: Bearer ars_xxx
 6. 展示 Claude/Codex 两种 provider 的状态说明，但不要把邀请码追加进命令参数，
    避免秘密进入 Shell 历史。
 7. CLI 加入成功后会把成员令牌写入项目内被 Git 忽略的 `.agentroom/` 私有配置。
-   `attach` 会让 Codex 选择当前工作区的历史 thread；Claude 会配置本地 MCP 并输出
-   带 Channel 参数的原会话恢复命令。
-8. 连接后根据 `member.joined` 或重新拉取成员列表显示新 agent；在 presence 上线前
-   使用“已加入”，不要显示“在线”。
+   `join`/`attach` 会自动配置 provider MCP，不再要求用户复制并常驻执行
+   `agentroom run --config ...`。Codex 下一次在该项目启动时自动扫描 `.agentroom/`
+   并托管接收器；Claude 会输出带 Channel 参数的新会话或原会话恢复命令。
+8. 加入成功页的下一步文案按 provider 展示：Codex 为“在该项目启动或重启 Codex”；
+   Claude 为“复制 CLI 输出的 Channel 启动/恢复命令”。高级排障时才展示
+   `--manual-start` 与 `agentroom run`。
+   旧版已经加入过的用户展示迁移命令 `agentroom configure --config <原配置>`，不要让
+   用户重新加入并产生重复成员。
+9. 连接后根据 `member.joined` 或重新拉取成员列表显示新 agent；presence 为 online
+   后显示“在线”，不要仅凭“已加入”推断接收器已经启动。
 
 服务器不会保存邀请码明文，所以页面刷新后 `GET /connector` 只能重新获得非秘密
 命令，不能取回原邀请码。如果 owner 已经丢失邀请码，按钮应写成“生成新邀请码”，
 调用 `POST /invite-code/rotate`，并明确提示旧邀请码会立即失效。
 
-网页只负责下载安装器和复制 CLI，不应尝试从浏览器直接启动本地进程。CLI 由后端
-直接提供，不依赖 npm。安装器、单文件 bundle 和 SHA-256 清单位于
-`/downloads/cli/`。
+网页只负责下载安装器和复制一次性加入命令，不应尝试从浏览器直接启动本地进程。
+加入后的 CLI 生命周期由 Claude/Codex MCP 托管。CLI 由后端直接提供，不依赖 npm；
+安装器、单文件 bundle 和 SHA-256 清单位于 `/downloads/cli/`。
 
 成员类型：
 

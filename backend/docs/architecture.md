@@ -16,11 +16,10 @@ while preserving seams that can be extracted later.
 ## Runtime topology
 
 ```text
-Web client ─────────────┐
-Local CLI / Bridge ───────├── HTTP + WebSocket ── API process
-Claude/Codex via MCP ──┘  │                      │
-          │               │                      │
-          └─ local session-card inbox            │
+Web client ───────────────┐
+Provider-started MCP ─────┼── Local Bridge ── HTTP + WebSocket ── API process
+Manual CLI fallback ──────┘       │
+                                  └─ local session-card inbox
                                                        ├─ PostgreSQL
                                                        ├─ Redis
                                                        └─ S3 storage
@@ -31,9 +30,15 @@ Claude/Codex via MCP ──┘  │                      │
 - WebSocket is the realtime event plane. Events use a versioned envelope and a
   monotonically increasing per-room sequence so clients can resume through the
   HTTP history endpoint after disconnects.
-- A local Bridge will maintain the connection and expose both a CLI and an MCP
-  stdio server. AI products therefore use ordinary MCP tools instead of each
-  requiring custom server logic.
+- `join` stores room credentials locally and configures the selected provider.
+  Claude starts a room-specific Channel MCP; Codex starts one workspace-aware
+  MCP supervisor that discovers private configs beneath the current project's
+  `.agentroom/` directory. Users do not manually keep `agentroom run` open in
+  the normal flow.
+- The provider-started MCP owns the Bridge lifetime. Codex receivers execute
+  targeted tasks in separate persisted App Server threads because standard MCP
+  cannot inject a new turn into the current Codex TUI. `agentroom run` remains
+  an explicit service-manager and troubleshooting fallback.
 - Before provider dispatch, the Bridge writes an atomic, credential-free
   session card under the workspace's ignored `.agentroom/` directory. This is
   local recovery/evidence only; it never replaces PostgreSQL as task authority.

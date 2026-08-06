@@ -31,7 +31,12 @@ not exposed in copied shell commands. `connector.command` starts a new local
 agent session, while `connector.attachCommand` binds an existing Claude or
 Codex conversation. `connector.installers` exposes public macOS/Linux and
 Windows downloads plus the checksum manifest; installed commands do not use
-npm or npx.
+npm or npx. A successful `join`/`attach` configures provider-managed startup:
+Claude launches its room Channel MCP and Codex launches a single
+workspace-aware receiver MCP. `agentroom run` is a manual fallback, not a
+normal user step. Both providers reuse one stable per-user CLI installation;
+`agentroom update` verifies and atomically replaces its bundle without changing
+MCP command paths.
 
 Normal `text` messages never start an agent. An explicit `agent.task` names one
 or more agent member IDs and creates a delivery for each target. Bridges recover

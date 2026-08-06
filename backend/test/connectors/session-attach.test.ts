@@ -6,6 +6,9 @@ import {
   claudeMcpAddArgs,
   claudeResumeArgs,
   claudeServerName,
+  claudeStartArgs,
+  codexMcpAddArgs,
+  codexReceiverServerName,
   codexStatePath,
   commandLine,
   formatCodexThread,
@@ -163,6 +166,10 @@ describe("session attachment", () => {
       "--dangerously-load-development-channels",
       `server:${serverName}`,
     ]);
+    expect(claudeStartArgs(serverName)).toEqual([
+      "--dangerously-load-development-channels",
+      `server:${serverName}`,
+    ]);
     expect(
       commandLine(
         "claude",
@@ -175,5 +182,22 @@ describe("session attachment", () => {
     expect(
       commandLine("claude", ["session $(touch bad)'name"], "darwin"),
     ).toBe(`'claude' 'session $(touch bad)'"'"'name'`);
+  });
+
+  it("builds one token-free Codex workspace receiver MCP command", () => {
+    const cli = localCliInvocation(
+      "/Users/example/.local/bin/agentroom.mjs",
+      "/usr/local/bin/node",
+    );
+
+    expect(codexMcpAddArgs(cli)).toEqual([
+      "mcp",
+      "add",
+      codexReceiverServerName,
+      "--",
+      "/usr/local/bin/node",
+      resolve("/Users/example/.local/bin/agentroom.mjs"),
+      "mcp",
+    ]);
   });
 });

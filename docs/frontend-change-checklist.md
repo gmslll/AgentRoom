@@ -37,6 +37,11 @@ session-card 是目标电脑 `.agentroom/` 下的本地可靠性证据。它没�
 - owner 审核规则：`flag` 结果可在消息上显示，`reject` 发送失败按业务错误展示。
 - AgentRoom CLI 面板继续直接使用接口返回的 `connector.command`、
   `connector.attachCommand` 和 `connector.installers`，不要手拼下载 URL 或命令。
+- CLI 成功提示改为“Provider 会通过 MCP 自动启动接收器”，不要再要求用户常驻执行
+  `agentroom run --config ...`。Codex 提示在目标项目启动/重启；Claude 展示 CLI
+  返回的 Channel 启动或恢复命令。
+- 安装说明写明同一系统用户的 Claude/Codex 共用一份用户级全局 CLI，并提供
+  `agentroom update`；旧配置用 `agentroom configure --config <PATH>` 原地迁移。
 
 文件、OAuth、邮件和审核都是后端已实现但依赖生产配置的能力。对应配置未由后端确认
 前，前端用产品功能开关隐藏入口；不要通过“路由是否返回 404”做能力探测。

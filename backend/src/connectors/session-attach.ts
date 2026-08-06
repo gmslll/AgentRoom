@@ -90,6 +90,8 @@ export function claudeServerName(roomId: string, memberId: string): string {
   return `agentroom_${safeSegment(roomId).slice(-16)}_${safeSegment(memberId).slice(-8)}`;
 }
 
+export const codexReceiverServerName = "agentroom_receiver";
+
 export function claudeMcpAddArgs(
   serverName: string,
   configPath: string,
@@ -109,6 +111,18 @@ export function claudeMcpAddArgs(
     "run",
     "--config",
     configPath,
+  ];
+}
+
+export function codexMcpAddArgs(cli: CommandInvocation): string[] {
+  return [
+    "mcp",
+    "add",
+    codexReceiverServerName,
+    "--",
+    cli.command,
+    ...cli.args,
+    "mcp",
   ];
 }
 
@@ -133,6 +147,13 @@ export function claudeResumeArgs(
   return session === "last"
     ? ["--continue", ...channelArgs]
     : ["--resume", session, ...channelArgs];
+}
+
+export function claudeStartArgs(serverName: string): string[] {
+  return [
+    "--dangerously-load-development-channels",
+    `server:${serverName}`,
+  ];
 }
 
 export function commandLine(

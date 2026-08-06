@@ -9,6 +9,9 @@ import {
   claudeMcpAddArgs,
   claudeResumeArgs,
   claudeServerName,
+  claudeStartArgs,
+  codexMcpAddArgs,
+  codexReceiverServerName,
   codexStatePath,
   commandLine,
   formatCodexThread,
@@ -30,6 +33,19 @@ import {
   credentialAccount,
   resolveCredentialStoreKind,
 } from "./secret-store.js";
+import { updateInstalledCli } from "./self-update.js";
+
+declare const __AGENTROOM_CLI_VERSION__: string;
+declare const __AGENTROOM_CLI_DOWNLOAD_BASE__: string;
+
+const cliVersion =
+  typeof __AGENTROOM_CLI_VERSION__ === "string"
+    ? __AGENTROOM_CLI_VERSION__
+    : "0.2.0-dev";
+const cliDownloadBase =
+  typeof __AGENTROOM_CLI_DOWNLOAD_BASE__ === "string"
+    ? __AGENTROOM_CLI_DOWNLOAD_BASE__
+    : "http://127.0.0.1:8787/downloads/cli";
 
 const [command, ...args] = process.argv.slice(2);
 
@@ -40,6 +56,14 @@ try {
     await joinRoom(args, true);
   } else if (command === "run") {
     await runBridge(args);
+  } else if (command === "mcp") {
+    await runCodexMcp(args);
+  } else if (command === "configure") {
+    await configureExistingBridge(args);
+  } else if (command === "update") {
+    await updateCli(args);
+  } else if (command === "version" || command === "--version") {
+    console.log(`agentroom ${cliVersion}`);
   } else {
     printUsage();
     process.exitCode = command === undefined || command === "--help" ? 0 : 1;
@@ -75,6 +99,11 @@ async function joinRoom(args: string[], attach: boolean): Promise<void> {
     );
     const workspace = resolve(option(args, "--workspace") ?? process.cwd());
     const session = option(args, "--session") ?? "last";
+    const manualStart = args.includes("--manual-start");
+    const codexCommand =
+      option(args, "--codex-command") ??
+      process.env.AGENTROOM_CODEX_COMMAND ??
+      "codex";
     const codexThreadId =
       attach && provider === "codex"
         ? await chooseCodexThread(args, prompt, workspace, session)
@@ -83,8 +112,11 @@ async function joinRoom(args: string[], attach: boolean): Promise<void> {
       option(args, "--claude-command") ??
       process.env.AGENTROOM_CLAUDE_COMMAND ??
       "claude";
-    if (attach && provider === "claude") {
+    if (!manualStart && provider === "claude") {
       requireExecutable(claudeCommand, "Claude Code");
+    }
+    if (!manualStart && provider === "codex") {
+      requireExecutable(codexCommand, "Codex");
     }
     const response = await fetch(
       `${baseUrl}/v1/rooms/${encodeURIComponent(roomId)}/members`,
@@ -174,26 +206,36 @@ async function joinRoom(args: string[], attach: boolean): Promise<void> {
         resumeRequired: true,
       });
       console.log(`Attached existing Codex thread ${codexThreadId}.`);
+    }
+
+    if (manualStart) {
       console.log(`Start the bridge with: ${runCommand}`);
-    } else if (attach && provider === "claude") {
+    } else if (provider === "codex") {
+      configureCodexMcp(codexCommand, localCli, workspace);
+      console.log(`Configured Codex MCP receiver ${codexReceiverServerName}.`);
+      console.log(
+        `Start or restart Codex in ${workspace}; AgentRoom will connect automatically.`,
+      );
+      console.log(
+        "Use /mcp or the agentroom_receiver_status tool to inspect the receiver.",
+      );
+    } else {
       const serverName = claudeServerName(roomId, memberId);
       const mcpArgs = claudeMcpAddArgs(serverName, configPath, localCli);
       configureClaudeMcp(claudeCommand, mcpArgs, workspace);
       console.log(`Configured Claude MCP channel ${serverName}.`);
-      console.log("Exit the original Claude process before resuming it with:");
+      console.log(
+        attach
+          ? "Exit the original Claude process before resuming it with:"
+          : "Start Claude Code with:",
+      );
       console.log(
         commandLine(
           claudeCommand,
-          claudeResumeArgs(session, serverName),
+          attach
+            ? claudeResumeArgs(session, serverName)
+            : claudeStartArgs(serverName),
         ),
-      );
-    } else if (provider === "codex") {
-      console.log(`Start the bridge with: ${runCommand}`);
-    } else {
-      console.log("Configure Claude Code MCP to run:");
-      console.log(runCommand);
-      console.log(
-        "Then load the channel with --dangerously-load-development-channels server:agentroom.",
       );
     }
   } finally {
@@ -232,6 +274,86 @@ async function runBridge(args: string[]): Promise<void> {
     }
   } finally {
     await releaseLock();
+  }
+}
+
+async function runCodexMcp(args: string[]): Promise<void> {
+  const workspace = resolve(option(args, "--workspace") ?? process.cwd());
+  process.env.AGENTROOM_DISCOVERY_WORKSPACE = workspace;
+  await import("./codex/mcp-receiver.js");
+}
+
+async function configureExistingBridge(args: string[]): Promise<void> {
+  const configPath = option(args, "--config") ?? positional(args, 0);
+  if (!configPath) {
+    throw new Error("--config is required");
+  }
+  const resolvedConfigPath = resolve(configPath);
+  const config = parseStoredConfig(
+    JSON.parse(await readFile(resolvedConfigPath, "utf8")) as unknown,
+  );
+  const localCli = localCliInvocation();
+
+  if (config.provider === "codex") {
+    const codexCommand =
+      option(args, "--codex-command") ??
+      process.env.AGENTROOM_CODEX_COMMAND ??
+      "codex";
+    requireExecutable(codexCommand, "Codex");
+    configureCodexMcp(codexCommand, localCli, config.workspace);
+    console.log(`Configured Codex MCP receiver ${codexReceiverServerName}.`);
+    console.log(
+      `Start or restart Codex in ${config.workspace}; AgentRoom will connect automatically.`,
+    );
+    return;
+  }
+
+  if (!config.memberId) {
+    throw new Error(
+      "The existing Claude config has no memberId; join the room again to create an MCP-managed config",
+    );
+  }
+  const claudeCommand =
+    option(args, "--claude-command") ??
+    process.env.AGENTROOM_CLAUDE_COMMAND ??
+    "claude";
+  requireExecutable(claudeCommand, "Claude Code");
+  const serverName = claudeServerName(config.roomId, config.memberId);
+  configureClaudeMcp(
+    claudeCommand,
+    claudeMcpAddArgs(serverName, resolvedConfigPath, localCli),
+    config.workspace,
+  );
+  console.log(`Configured Claude MCP channel ${serverName}.`);
+  console.log("Start Claude Code with:");
+  console.log(commandLine(claudeCommand, claudeStartArgs(serverName)));
+}
+
+async function updateCli(args: string[]): Promise<void> {
+  const targetPath = process.env.AGENTROOM_CLI_ENTRY;
+  if (!targetPath) {
+    throw new Error(
+      "agentroom update must be run through the globally installed agentroom launcher",
+    );
+  }
+  const result = await updateInstalledCli({
+    downloadBase:
+      option(args, "--download-base") ??
+      process.env.AGENTROOM_DOWNLOAD_BASE ??
+      cliDownloadBase,
+    targetPath,
+  });
+  if (result.updated) {
+    console.log(
+      `Updated AgentRoom CLI to ${result.version} (${result.sha256.slice(0, 12)}).`,
+    );
+    console.log(
+      "Restart Claude/Codex so their MCP receivers use the updated CLI.",
+    );
+  } else {
+    console.log(
+      `AgentRoom CLI is already current (${result.version}, ${result.sha256.slice(0, 12)}).`,
+    );
   }
 }
 
@@ -336,6 +458,67 @@ function configureClaudeMcp(
   }
 }
 
+function configureCodexMcp(
+  command: string,
+  cli: ReturnType<typeof localCliInvocation>,
+  workspace: string,
+): void {
+  const expectedCommand = cli.command;
+  const expectedArgs = [...cli.args, "mcp"];
+  const existing = spawnSync(
+    command,
+    ["mcp", "get", codexReceiverServerName, "--json"],
+    { cwd: workspace, encoding: "utf8" },
+  );
+  if (existing.error) {
+    throw new Error(
+      `Could not inspect Codex MCP configuration: ${existing.error.message}`,
+    );
+  }
+  if (existing.status === 0) {
+    const parsed = JSON.parse(existing.stdout || "{}") as {
+      transport?: {
+        type?: string;
+        command?: string;
+        args?: string[];
+      };
+    };
+    if (
+      parsed.transport?.type !== "stdio" ||
+      parsed.transport.command !== expectedCommand ||
+      !sameStrings(parsed.transport.args, expectedArgs)
+    ) {
+      throw new Error(
+        `Codex MCP server ${codexReceiverServerName} already exists with a different command. ` +
+          `Remove it with '${command} mcp remove ${codexReceiverServerName}', then run agentroom join again.`,
+      );
+    }
+    return;
+  }
+
+  const result = spawnSync(command, codexMcpAddArgs(cli), {
+    cwd: workspace,
+    stdio: "inherit",
+  });
+  if (result.error || result.status !== 0) {
+    const reason = result.error?.message ?? `exit status ${result.status}`;
+    throw new Error(
+      `Could not configure the Codex MCP receiver (${reason}). Run manually: ${commandLine(command, codexMcpAddArgs(cli))}`,
+    );
+  }
+}
+
+function sameStrings(
+  actual: string[] | undefined,
+  expected: string[],
+): boolean {
+  return (
+    Array.isArray(actual) &&
+    actual.length === expected.length &&
+    actual.every((value, index) => value === expected[index])
+  );
+}
+
 function option(args: string[], name: string): string | undefined {
   const index = args.indexOf(name);
   if (index === -1) {
@@ -401,10 +584,14 @@ function printUsage(): void {
 Usage:
   agentroom join <room-id> [--invite CODE] [--provider claude|codex]
                  [--name NAME] [--base-url URL] [--workspace PATH]
-                 [--credential-store file|keychain]
+                 [--credential-store file|keychain] [--manual-start]
   agentroom attach <room-id> [--invite CODE] [--provider claude|codex]
                    [--session last|ID|NAME] [--name NAME]
                    [--base-url URL] [--workspace PATH]
-                   [--credential-store file|keychain]
-  agentroom run --config PATH`);
+                   [--credential-store file|keychain] [--manual-start]
+  agentroom run --config PATH
+  agentroom mcp [--workspace PATH]
+  agentroom configure --config PATH
+  agentroom update [--download-base URL]
+  agentroom --version`);
 }
