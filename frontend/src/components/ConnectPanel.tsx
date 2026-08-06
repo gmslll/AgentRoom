@@ -1,47 +1,46 @@
 import { useState } from "react";
-import type { ConnectorResponse, RotateInviteResponse } from "../api/types";
+import type {
+  ConnectorResponse,
+  RoomVisibility,
+  RotateInviteResponse,
+} from "../api/types";
 import { useRotateInvite } from "../api/hooks";
 import { CopyButton } from "./CopyButton";
 import { createInstallerCommands } from "./installer-commands";
+import { Icon } from "./ui/Icon";
+import { createSelfOnboardingPrompt } from "../lib/self-onboarding";
 
 interface ConnectPanelProps {
   roomId: string;
   connector: ConnectorResponse | undefined;
   loading: boolean;
-  /** True when the current user is the room owner. */
   isOwner: boolean;
-  /** True while waiting for an agent to join after copying a command. */
+  visibility?: RoomVisibility;
+  initialInviteCode?: string | null;
   waitingForAgent: boolean;
-  /** Called after the user copies a join command (enters "waiting for agent"). */
   onCommandCopied?: () => void;
 }
 
-/**
- * "Connect your agent" onboarding for the room owner: installers, copyable CLI
- * commands, and the invite code. Commands come from the backend connector
- * object and are never assembled in the frontend.
- */
 export function ConnectPanel({
   roomId,
   connector,
   loading,
   isOwner,
+  visibility = "private",
+  initialInviteCode = null,
   waitingForAgent,
   onCommandCopied,
 }: ConnectPanelProps) {
-  const [inviteCode, setInviteCode] = useState<string | null>(null);
+  const [inviteCode, setInviteCode] = useState<string | null>(
+    initialInviteCode,
+  );
   const rotate = useRotateInvite(roomId);
-  const installerCommands = connector
+  const installers = connector
     ? createInstallerCommands(connector.connector.installers)
     : null;
+  const publicRoom = visibility === "public";
 
-  const handleShowInvite = async () => {
-    if (inviteCode) return;
-    const result = await rotate.mutateAsync();
-    setInviteCode(result.inviteCode);
-  };
-
-  const handleRotate = async () => {
+  const issueInvite = async () => {
     let result: RotateInviteResponse;
     try {
       result = await rotate.mutateAsync();
@@ -51,207 +50,258 @@ export function ConnectPanel({
     setInviteCode(result.inviteCode);
   };
 
-  if (!isOwner) {
+  if (!isOwner)
     return (
-      <div className="space-y-3 p-4 text-sm text-muted">
-        <p>只有房间 owner 可以接入 Agent 或查看邀请码。</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-4 p-4 text-sm">
-      <div>
-        <h3 className="mb-1 text-sm font-semibold text-text">连接本地 Agent</h3>
-        <p className="text-xs leading-relaxed text-muted">
-          需要 Node.js 22+ 和已登录的 Claude Code 或 Codex CLI。先在终端{" "}
-          <code className="font-mono">cd</code> 到希望 AI 操作的项目目录,再在
-          终端里运行下面的命令。
+      <div className="p-5">
+        <p className="eyebrow">Owner channel only</p>
+        <p className="mt-3 text-xs leading-5 text-muted">
+          只有房间 owner 可以生成邀请码和本地 Agent 接入信息。
         </p>
       </div>
+    );
+  if (loading || !connector || !installers)
+    return <p className="p-5 text-xs text-muted">正在获取连接信息…</p>;
 
-      {loading || !connector ? (
-        <p className="text-xs text-muted">正在获取连接信息…</p>
-      ) : (
-        <>
-          <div className="space-y-2">
-            <div className="flex items-baseline justify-between gap-3">
-              <p className="text-xs text-muted">
-                ① 第一次使用，复制对应系统的安装命令：
-              </p>
-              <span className="shrink-0 rounded-full border border-terminal/20 bg-terminal/5 px-2 py-0.5 text-[10px] text-terminal">
-                只需安装一次
-              </span>
-            </div>
-            <div className="grid gap-2 sm:grid-cols-2">
-              <InstallerCard
-                platform="macOS / Linux"
-                prompt="$"
-                command={installerCommands!.macosLinux}
-                installerUrl={connector.connector.installers.macosLinuxUrl}
-              />
-              <InstallerCard
-                platform="Windows PowerShell"
-                prompt="PS>"
-                command={installerCommands!.windowsPowerShell}
-                installerUrl={connector.connector.installers.windowsUrl}
-              />
-              <InstallerCard
-                platform="Windows CMD"
-                prompt=">"
-                command={installerCommands!.windowsCmd}
-                installerUrl={connector.connector.installers.windowsUrl}
-              />
-            </div>
-            <p className="text-[11px] leading-relaxed text-muted">
-              安装器会校验 CLI 的 SHA-256。安装完成后重新打开终端，运行{" "}
-              <code className="font-mono text-text">agentroom --version</code>{" "}
-              验证。
-            </p>
-          </div>
+  const selfPrompt =
+    publicRoom || inviteCode
+      ? createSelfOnboardingPrompt({
+          roomId,
+          inviteCode,
+          publicRoom,
+          connector,
+        })
+      : null;
 
-          <div className="space-y-2">
-            <p className="text-xs text-muted">
-              ② 在目标项目目录中复制并运行加入命令：
-            </p>
-            <CommandRow
-              label="加入并启动新会话"
-              command={connector.connector.command}
-              onCopied={onCommandCopied}
+  return (
+    <div className="space-y-7 p-4">
+      <section>
+        <StepTitle
+          index="01"
+          title="安装 AgentRoom CLI"
+          detail="同一系统用户只需安装一次，Claude 与 Codex 共用；Provider MCP 启动时会自动核对版本。"
+        />
+        <div className="space-y-2">
+          <InstallerRow label="macOS / Linux" command={installers.macosLinux} />
+          <InstallerRow
+            label="Windows PowerShell"
+            command={installers.windowsPowerShell}
+          />
+          <details className="border border-border bg-bg/40 px-3 py-2">
+            <summary className="cursor-pointer text-[10px] text-muted">
+              Windows CMD 命令
+            </summary>
+            <code className="font-data mt-2 block overflow-x-auto text-[9px] text-text">
+              {installers.windowsCmd}
+            </code>
+            <CopyButton
+              text={installers.windowsCmd}
+              label="复制 CMD"
+              className="mt-2"
             />
-            <CommandRow
-              label="加入并恢复已有会话"
-              command={connector.connector.attachCommand}
-              onCopied={onCommandCopied}
+          </details>
+          <div className="flex flex-wrap gap-2">
+            <CopyButton text="agentroom update" label="手动更新 CLI" />
+            <CopyButton
+              text={'agentroom configure --config "<PATH>"'}
+              label="迁移旧配置"
             />
           </div>
+        </div>
+        <p className="mt-2 text-[10px] leading-5 text-muted">
+          安装器先下载到本地再执行，并校验 CLI bundle 的 SHA-256；不依赖 npx/npm
+          全局包。
+        </p>
+      </section>
 
-          <p className="rounded-md border border-terminal/20 bg-terminal/5 px-3 py-2 text-[11px] leading-relaxed text-muted">
-            完成交互式询问后，CLI 会注入房间信息并直接启动对应的 Claude Code 或
-            Codex CLI；网页定向任务会进入刚启动的会话，无需再复制第二条启动命令。
-            只配置不启动时可在加入命令后追加{" "}
-            <code className="font-mono text-text">--no-launch</code>。
-          </p>
-
-          <div className="space-y-2">
-            <p className="text-xs text-muted">
-              ③ 获取邀请码（CLI 会交互式询问）：
+      <section>
+        <StepTitle
+          index="02"
+          title="启动 Agent 会话"
+          detail="在目标项目目录运行。CLI 会配置对应 MCP、注入聊天室用法，并默认启动选中的 Claude/Codex。"
+        />
+        <CommandCard
+          label="新会话"
+          detail="加入后创建新的 Claude/Codex 对话"
+          command={connector.connector.command}
+          onCopied={onCommandCopied}
+        />
+        <CommandCard
+          label="已有会话"
+          detail="绑定并恢复当前工作区最近一次对话"
+          command={connector.connector.attachCommand}
+          onCopied={onCommandCopied}
+        />
+        <details className="well mt-3 px-3 py-2">
+          <summary className="cursor-pointer text-[10px] text-warning">
+            Windows 报 claude ENOENT？
+          </summary>
+          <div className="mt-2 space-y-2 text-[10px] leading-5 text-muted">
+            <p>
+              先在新 PowerShell 运行{" "}
+              <code className="font-data text-text">where.exe claude</code> 和{" "}
+              <code className="font-data text-text">claude --version</code>
+              。仍找不到时，在加入命令后追加：
             </p>
-            {inviteCode ? (
-              <div className="flex items-center gap-2">
-                <code className="min-w-0 flex-1 truncate rounded-md border border-border bg-surface px-2 py-1 font-mono text-xs text-text">
-                  {inviteCode}
-                </code>
-                <CopyButton text={inviteCode} label="复制" />
-                <button
-                  type="button"
-                  onClick={handleRotate}
-                  disabled={rotate.isPending}
-                  className="rounded-md border border-border px-2 py-1 text-xs text-muted transition-colors hover:border-border-strong hover:text-text disabled:opacity-50"
-                  title="旧邀请码将立即失效"
-                >
-                  重新生成
-                </button>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={handleShowInvite}
-                disabled={rotate.isPending}
-                className="rounded-md border border-border px-3 py-1.5 text-xs text-text transition-colors hover:border-border-strong hover:bg-surface-raised disabled:opacity-50"
-              >
-                显示邀请码
-              </button>
-            )}
-            {rotate.isSuccess && (
-              <p className="text-xs text-warning">
-                新邀请码已生成,旧邀请码立即失效。
-              </p>
-            )}
+            <CopyButton
+              text={'--claude-command "%USERPROFILE%\\.local\\bin\\claude.exe"'}
+              label="复制路径参数"
+            />
+          </div>
+        </details>
+      </section>
+
+      <section>
+        <StepTitle
+          index="03"
+          title={publicRoom ? "公开房间" : "邀请码"}
+          detail={
+            publicRoom
+              ? "Agent 可使用 --public 直接加入。"
+              : "邀请码不会由服务器再次明文返回；重新生成会让旧码立即失效。"
+          }
+        />
+        {publicRoom ? (
+          <div className="flex items-center gap-2 border border-human/25 bg-human/5 px-3 py-2 text-xs text-human">
+            <Icon name="globe" size={15} />
+            无需邀请码
+          </div>
+        ) : inviteCode ? (
+          <div className="space-y-2">
             <div className="flex items-center gap-2">
-              <CopyButton
-                text={`${window.location.origin}/rooms/${roomId}`}
-                label="复制邀请链接"
-              />
-              <span className="text-xs text-muted">
-                分享给他人:打开链接后用上面的邀请码加入
-              </span>
+              <code className="font-data min-w-0 flex-1 truncate border border-primary/30 bg-primary/5 px-3 py-2 text-xs text-primary">
+                {inviteCode}
+              </code>
+              <CopyButton text={inviteCode} />
             </div>
+            <button
+              type="button"
+              onClick={() => void issueInvite()}
+              disabled={rotate.isPending}
+              className="text-[10px] text-warning hover:underline"
+            >
+              重新生成（旧码立即失效）
+            </button>
           </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => void issueInvite()}
+            disabled={rotate.isPending}
+            className="button-secondary h-10 px-3 text-xs"
+          >
+            <Icon name="key" size={15} />
+            {rotate.isPending ? "生成中…" : "生成邀请码"}
+          </button>
+        )}
+        <div className="mt-3 flex flex-wrap gap-2">
+          <CopyButton
+            text={`${window.location.origin}/rooms/${roomId}`}
+            label="复制网页邀请链接"
+          />
+          <a
+            href={`${window.location.origin}/rooms/${roomId}`}
+            className="button-secondary h-8 px-2 text-[10px]"
+          >
+            <Icon name="link" size={12} />
+            打开链接
+          </a>
+        </div>
+      </section>
 
-          {waitingForAgent && (
-            <div className="rounded-md border border-warning/30 bg-warning/5 px-3 py-2 text-xs text-warning">
-              等待 Agent 加入…在终端完成交互式询问后，对应 AI 会自动启动并上线。
-            </div>
-          )}
-        </>
+      <section>
+        <StepTitle
+          index="04"
+          title="让当前 AI 自己接入"
+          detail="把一段指令直接交给已经运行的 Claude/Codex，让它自检安装并预绑定当前会话。"
+        />
+        {selfPrompt ? (
+          <div className="border border-agent/30 bg-agent/5 p-3">
+            <p className="text-[10px] leading-5 text-muted">
+              提示词包含当前邀请码，只应粘贴到可信的本地 AI
+              会话；不要记录或转发。
+            </p>
+            <CopyButton
+              text={selfPrompt}
+              label="复制自助接入提示词"
+              className="mt-3 border-agent/40 text-agent"
+              onCopied={onCommandCopied}
+            />
+          </div>
+        ) : (
+          <div className="well p-3 text-[10px] leading-5 text-muted">
+            先在上方生成邀请码，才能构造非交互自助接入提示词。
+          </div>
+        )}
+      </section>
+
+      {waitingForAgent && (
+        <div className="relative overflow-hidden border border-warning/35 bg-warning/5 px-4 py-3">
+          <span className="absolute inset-y-0 left-0 w-0.5 animate-scan bg-warning" />
+          <p className="font-data text-[10px] text-warning">
+            WAITING FOR AGENT SIGNAL…
+          </p>
+          <p className="mt-1 text-[11px] text-muted">
+            终端完成配置后，Agent 会自动启动并出现在成员列表。
+          </p>
+        </div>
       )}
-
-      <p className="text-xs text-muted">
-        Claude Code 与 Codex 共用这份用户级安装；Provider MCP 启动时会自动检查并
-        更新 AgentRoom。以后可用 CLI 输出的{" "}
-        <code className="font-mono text-text">agentroom start --config …</code>{" "}
-        重新进入该 AgentRoom 会话。
-      </p>
     </div>
   );
 }
 
-function InstallerCard({
-  platform,
-  prompt,
-  command,
-  installerUrl,
+function StepTitle({
+  index,
+  title,
+  detail,
 }: {
-  platform: string;
-  prompt: string;
-  command: string;
-  installerUrl: string;
+  index: string;
+  title: string;
+  detail: string;
 }) {
   return (
-    <div className="min-w-0 rounded-lg border border-border bg-surface p-2.5 shadow-sm">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <span className="text-xs font-medium text-text">{platform}</span>
-        <a
-          href={installerUrl}
-          target="_blank"
-          rel="noreferrer"
-          className="text-[10px] text-muted underline decoration-border-strong underline-offset-2 transition-colors hover:text-text"
-        >
-          查看脚本
-        </a>
-      </div>
-      <div className="flex min-w-0 items-center gap-2 rounded-md border border-border bg-bg px-2 py-1.5">
-        <span className="shrink-0 font-mono text-[10px] text-terminal">
-          {prompt}
-        </span>
-        <code
-          className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-mono text-[11px] text-text"
-          title={command}
-        >
-          {command}
-        </code>
-        <CopyButton text={command} label="复制" className="shrink-0" />
-      </div>
+    <div className="mb-3">
+      <p className="eyebrow text-[9px]">{index} / Connector</p>
+      <h3 className="mt-1.5 text-sm font-bold text-text">{title}</h3>
+      <p className="mt-1 text-[11px] leading-5 text-muted">{detail}</p>
     </div>
   );
 }
-
-function CommandRow({
+function InstallerRow({ label, command }: { label: string; command: string }) {
+  return (
+    <div className="border border-border bg-bg/50 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] font-semibold text-text">{label}</span>
+        <CopyButton text={command} />
+      </div>
+      <code className="font-data mt-2 block overflow-x-auto whitespace-nowrap text-[9px] text-muted">
+        {command}
+      </code>
+    </div>
+  );
+}
+function CommandCard({
   label,
+  detail,
   command,
   onCopied,
 }: {
   label: string;
+  detail: string;
   command: string;
   onCopied?: () => void;
 }) {
   return (
-    <div className="flex items-center gap-2">
-      <code className="min-w-0 flex-1 truncate rounded-md border border-border bg-surface px-2 py-1.5 font-mono text-xs text-text">
+    <div className="mb-2 border-l-2 border-primary/40 bg-bg/50 p-3">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <p className="text-xs font-bold text-text">{label}</p>
+          <p className="mt-0.5 text-[9px] text-muted">{detail}</p>
+        </div>
+        <CopyButton text={command} label="复制命令" onCopied={onCopied} />
+      </div>
+      <code className="font-data mt-3 block overflow-x-auto whitespace-nowrap text-[9px] text-muted">
         {command}
       </code>
-      <CopyButton text={command} label={label} onCopied={onCopied} />
     </div>
   );
 }

@@ -1,52 +1,59 @@
 # Frontend progress
 
-> 记录前端实现进度,供后续迭代参考。最后更新:2026-08-06(合并远程治理功能)。
+> 最后更新：2026-08-07（release-v0.7.0）。当前实现以
+> [`../docs/superpowers/specs/2026-08-06-frontend-signal-operations-design.md`](../docs/superpowers/specs/2026-08-06-frontend-signal-operations-design.md)
+> 为视觉与交互基线，以 `shared/contracts/` 为协议基线。
 
-设计基线:`docs/superpowers/specs/2026-08-05-frontend-design.md`(已确认)。
-协议基线:`shared/contracts/http/openapi.yaml` + `shared/contracts/realtime/event.schema.json`。
+## 已完成
 
-## 完成 ✅
-
-| 模块 | 状态 | 说明 |
+| 模块 | 状态 | 当前实现 |
 | --- | --- | --- |
-| 工程脚手架 | ✅ | React 19 + Vite 6 + TS + React Router v7 + Tailwind v4(Vite 插件)+ TanStack Query v5 + Zustand 5 + RHF/Zod + Vitest;`npm run lint/typecheck/build/test` 全绿 |
-| API 层 | ✅ | `api/types.ts` 字段逐一对齐 openapi.yaml;`client.ts` 统一 `ApiError(status, code, message, requestId)`;`auth.ts`/`rooms.ts` 覆盖注册/登录/me/登出/房间/成员/connector/消息/票据;`hooks.ts` Query 封装,全局 `401 INVALID_SESSION/AUTH_REQUIRED` 清令牌 |
-| 鉴权 | ✅ | 账号令牌 `ars_` 存 `sessionStorage`(zustand persist),启动经 `/auth/me` 校验,`401 INVALID_TOKEN` 只回列表不清令牌 |
-| 实时层 | ✅ | `RealTimeClient`:票据 → 连接 → 25s 心跳 → 指数退避重连(每次新票据)→ 事件分发(`session.ready`/`member.joined`/`member.presence`/`message.created`/`delivery.updated`/`member.removed`/`room.updated`/`room.dissolved`);WebSocket 可注入,已有生命周期单测 |
-| stores | ✅ | message(按 `id` 去重、`sequence` 排序、watermark 水位)、member(稳定分组派生 `groups`,避免 useSyncExternalStore 无限循环)、delivery、token |
-| 页面 | ✅ | `/login`(登录/注册 tab,RHF+Zod)、`/rooms`(我的房间+公开大厅+创建)、`/rooms/:roomId`(消息/成员/接入/房主设置;公开免邀请码加入、私有走邀请码表单) |
-| 房间治理 | ✅ | 私有/公开切换、改名、**解散**(即房间删除)、踢人二次确认;被踢或解散后实时退出,公开房间可发现和直接加入 |
-| 在线状态 | ✅ | 初次 presence 快照 + 30 秒校准 + `member.presence` 实时更新;成员列表明确显示在线/离线 |
-| 消息流 | ✅ | 三类消息渲染:text 平铺 / `agent.task` 任务卡+delivery 状态条 / `agent.reply` 紫色竖线可折叠 + **「转派给…」**(预填回复上下文开派发模式);`message.id` 去重、`sequence` 排序 |
-| 历史加载 | ✅ | 进入房间**循环拉页到尾**(正序 API,无 beforeSequence 契约),不再只显示最早 50 条;上限 20 页保护;`session.ready` 补缺口 |
-| 任务派发 | ✅ | 仅 owner;`TaskComposer` 多选目标 agent(≤10);幂等键首次点击生成(UUID),网络重试复用,`IDEMPOTENCY_KEY_REUSED` 按 code 提示;**成员面板「派发任务」已接线**(预选目标) |
-| 错误反馈 | ✅ | 轻量 toast;加入房间区分 404「房间不存在」/503「服务暂不可用」/429「尝试过于频繁」 |
-| 接入引导 | ✅ | `ConnectPanel`:安装命令卡片(macOS/Linux、Windows,URL 取自 `connector.installers`)、新会话/已有会话复制(`connector.command`/`attachCommand`)、邀请码显示+旋转(提示旧码失效)、**复制邀请链接**、「等待 Agent 加入」态 |
-| delivery 文案 | ✅ | 对照 checklist:`queued` 等待终端 / `received` 已送达终端 / `running` AI 处理中 / `replied` 已回复 / `failed` 执行失败(`received` ≠「AI 已读」) |
-| 视觉(浅色终端调度台) | ✅ | 冷调纸白底 + 语义三色(加深保证对比度);JetBrains Mono 数据排版(消息序号/时间戳/状态/命令);`● ◐ ◉ ✓ ✕` 终端状态符号;克制动效 + `prefers-reduced-motion` 支持 |
-| 测试 | ✅ | 覆盖安装命令、幂等键、message/member store、presence、RealTimeClient(连接/治理事件/心跳/断线重连)、DeliveryStatusBadge 文案 |
+| 视觉系统 | ✅ | Signal Operations 深色工业协作台；Archivo Variable + JetBrains Mono；signal/human/agent/terminal 语义色；切角、信号轨、骨白交付纸；reduced-motion |
+| 响应式壳层 | ✅ | 桌面房间导航 + 消息工作区 + 控制 dock；平板/手机使用左右抽屉和底部房间工具栏 |
+| 账号 | ✅ | 登录、注册、会话恢复、登出、邮箱验证、忘记/重置/修改密码、Google/GitHub OAuth hash 接收；邮件和 OAuth 入口由构建开关控制 |
+| 房间总览 | ✅ | 创建私有/公开房间、我的房间、公开发现与直接加入；创建响应的一次性邀请码带入接入面板后立即从浏览器历史清除 |
+| 房间治理 | ✅ | 改名、公开性、解散、踢人、审核规则；owner-only 操作只进入设置/成员 dock |
+| 消息与实时 | ✅ | 三类消息、历史去重、WebSocket 票据/心跳/重连、header 连接状态、presence 快照与实时事件、被踢/解散自动退出 |
+| Agent 派发 | ✅ | 普通消息与定向任务模式分离；结构化 `@Agent` 选择只展示 `agent-access.canDispatch=true`；多目标、幂等键、delivery 五状态、继续派发 |
+| Agent 权限 | ✅ | 一次性 claim code 领取、用户授权/撤销、跨所有者 Agent 协作申请/接受/拒绝/撤销；不再把 room owner 当作 Agent 所有者 |
+| 文件附件 | ✅ | intent → PUT → complete；普通消息和 Agent task 可带附件；历史只保留 ID，进入视口才按 ID 获取短期下载 URL；房间级台账需 owner 主动打开 |
+| 本地接入 | ✅ | macOS/Linux、PowerShell、CMD 安装；新会话与已有会话；邀请码旋转；公开房；已有 AI 一句话自检安装并 `attach --session last --no-launch` |
+| 质量门 | ✅ | `lint`、`typecheck`、`test`、`build` 通过；23 个测试覆盖权限过滤、附件懒加载、自助接入、实时连接、store、delivery 与安装命令 |
 
-## 已知占位 / 待办 🔶
+## 构建开关
 
-- **历史超上限**:初始加载上限 20 页(1000 条);超长房间未拉取部分需后端增加
-  `beforeSequence` 契约后再支持(规格 §11 已注明不加该契约的现状)。
-- **接入引导空态**:无 agent 时中栏直接渲染 `ConnectPanel`,视觉可再打磨;有 agent 后引导缩为右栏 tab。
-
-## 明确不做(规格 §14,MVP 范围外)
-
-文件上传/附件、邮箱验证、找回/修改密码、OAuth、AI 间自动接力(协议变更单独立项)。
-
-## 运行
-
-```powershell
-cd frontend
-npm run dev        # http://localhost:4000(需后端 8787 已启动)
-npm test           # Vitest
-npm run build      # 生产构建
+```dotenv
+VITE_API_BASE_URL=http://127.0.0.1:8787
+VITE_ENABLE_EMAIL_AUTH=false
+VITE_ENABLE_GOOGLE_OAUTH=false
+VITE_ENABLE_GITHUB_OAUTH=false
+VITE_ENABLE_MODERATION=false
 ```
 
-- 本地联调:`.env` → `VITE_API_BASE_URL=http://127.0.0.1:8787`(已被 git 忽略)。
-- 前端 dev 端口为 4000;后端 CORS 需允许该 origin(本地用环境变量
-  `CORS_ORIGIN=http://localhost:4000` 启动;注意当前后端不读取 `.env` 文件,
-  需显式传入进程环境变量)。
-- 后端内存模式即可演示;重启后数据清空。
+生产服务器当前确认 `FILES_ENABLED=true`；邮件投递、OAuth 和审核没有生产配置，因此
+release 构建暂不显示对应入口。代码已经完整接线，配置就绪后在构建环境启用，不通过
+404 猜测能力。
+
+## 已知边界
+
+- 历史接口只有 `afterSequence`。前端从 0 正序遍历，最多加载 20 × 50 条；要正确处理
+  超过 1000 条的超长房间，需要后端补 `beforeSequence` 或尾页游标协议。
+- 当前执行环境没有可连接的浏览器实例，本轮已完成代码、响应式规则、构建和 jsdom
+  交互验证，但 360/768/1280/1536 的截图级浏览器验收仍需在浏览器可用时补做。
+- Bridge 专用 pending/status/reply 和 `/mcp` 不属于网页能力；网页只展示后端产生的
+  task、reply 和 delivery 事件。
+
+## 本地运行
+
+```bash
+cd backend
+CORS_ORIGIN=http://127.0.0.1:4000 npm run dev
+
+cd ../frontend
+cp .env.example .env
+npm run dev                 # http://127.0.0.1:4000
+npm run lint
+npm run typecheck
+npm test
+npm run build
+```

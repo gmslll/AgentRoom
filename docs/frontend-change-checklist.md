@@ -10,7 +10,10 @@
 推送 `release-vX.Y.Z` 标签时，同一个 GitHub Actions release 会用该 API 基址构建
 前端，并把 `frontend/dist` 与同提交的后端一起原子部署到服务器；前端不需要单独发布。
 
-## 现在需要调整
+## 已在仓库前端完成（2026-08-06）
+
+以下清单已经由 `frontend/` 的 Signal Operations 重构接入。后续前端维护者改动这些
+流程时仍应逐项回归，因此保留规则原文：
 
 - 接入 `GET /v1/rooms/{roomId}/agent-access`。`@Agent` 做成成员选择器，只展示
   `canDispatch: true` 的 Agent；提交现有 `agent.task`，将选择结果写入

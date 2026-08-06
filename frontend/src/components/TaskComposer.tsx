@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import { ApiError } from "../api/client";
-import { useSendTask, useSendText } from "../api/hooks";
 import { useShallow } from "zustand/react/shallow";
+import { ApiError } from "../api/client";
+import { useAgentAccess, useSendTask, useSendText } from "../api/hooks";
+import type { Attachment } from "../api/types";
 import { newIdempotencyKey } from "../lib/idempotency";
 import { providerLabel } from "../lib/provider";
 import { useMemberStore } from "../stores/memberStore";
+import { AttachmentPicker } from "./AttachmentStrip";
+import { Icon } from "./ui/Icon";
 
 export interface TaskComposerPreset {
-  /** Unique token per preset; changing it re-applies the preset. */
   key: string;
   text?: string;
   targetMemberIds?: string[];
@@ -15,198 +17,224 @@ export interface TaskComposerPreset {
 
 interface TaskComposerProps {
   roomId: string;
-  /** Preset that opens dispatch mode with pre-filled text/targets. */
   preset?: TaskComposerPreset | null;
 }
-
 const MAX_TARGETS = 10;
 
-/**
- * Message input. Ordinary text never triggers AI; only the room owner can
- * switch into task-dispatch mode and select explicit agent targets. The
- * idempotency key is generated once per dispatch and reused across retries.
- */
 export function TaskComposer({ roomId, preset }: TaskComposerProps) {
   const [text, setText] = useState("");
   const [dispatchMode, setDispatchMode] = useState(false);
   const [targets, setTargets] = useState<Set<string>>(new Set());
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [error, setError] = useState<string | null>(null);
   const idempotencyKeyRef = useRef<string | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const sendText = useSendText(roomId);
+  const sendTask = useSendTask(roomId);
+  const access = useAgentAccess(roomId);
+  const allAgents = useMemberStore(
+    useShallow((state) =>
+      Object.values(state.byId).filter(
+        (member) => member.actorType === "agent",
+      ),
+    ),
+  );
+  const allowedIds = new Set(
+    (access.data?.agents ?? [])
+      .filter((entry) => entry.canDispatch)
+      .map((entry) => entry.agentMemberId),
+  );
+  const agents = allAgents.filter((agent) => allowedIds.has(agent.id));
 
-  // Apply a dispatch preset (e.g. "re-dispatch this reply" or "dispatch to
-  // this member") each time its key changes.
   useEffect(() => {
     if (!preset) return;
     setText(preset.text ?? "");
-    setTargets(new Set(preset.targetMemberIds ?? []));
+    setTargets(
+      new Set(
+        (preset.targetMemberIds ?? []).filter((id) => allowedIds.has(id)),
+      ),
+    );
     setDispatchMode(true);
     setError(null);
+    textareaRef.current?.focus();
+    // `allowedIds` derives from query data; presets intentionally apply once by key.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preset?.key]);
 
-  const sendText = useSendText(roomId);
-  const sendTask = useSendTask(roomId);
-  const agents = useMemberStore(
-    useShallow((state) =>
-      Object.values(state.byId).filter((m) => m.actorType === "agent"),
-    ),
-  );
+  const pending = sendText.isPending || sendTask.isPending;
+  const canSend = text.trim().length > 0 && !pending;
+  const canDispatch = canSend && targets.size > 0;
+  const attachmentIds = attachments.map((attachment) => attachment.id);
 
-  const canSendText = text.trim().length > 0 && !sendText.isPending;
-  const canDispatch = text.trim().length > 0 && targets.size > 0 && !sendTask.isPending;
-
-  const handleSendText = async () => {
+  const send = async () => {
     const value = text.trim();
     if (!value) return;
     setError(null);
     try {
-      await sendText.mutateAsync({ text: value });
-      setText("");
-    } catch (err) {
-      setError(messageOf(err));
-    }
-  };
-
-  const handleDispatch = async () => {
-    const value = text.trim();
-    if (!value || targets.size === 0) return;
-    setError(null);
-    if (!idempotencyKeyRef.current) {
-      idempotencyKeyRef.current = newIdempotencyKey();
-    }
-    const idempotencyKey = idempotencyKeyRef.current;
-    try {
-      await sendTask.mutateAsync({
-        kind: "agent.task",
-        text: value,
-        targetMemberIds: [...targets],
-        idempotencyKey,
-      });
-      idempotencyKeyRef.current = null;
-      setText("");
-      setTargets(new Set());
-      setDispatchMode(false);
-    } catch (err) {
-      // Keep the same idempotency key for retries; it was never accepted.
-      setError(messageOf(err));
-    }
-  };
-
-  const toggleTarget = (memberId: string) => {
-    setTargets((prev) => {
-      const next = new Set(prev);
-      if (next.has(memberId)) {
-        next.delete(memberId);
-      } else if (next.size < MAX_TARGETS) {
-        next.add(memberId);
+      if (dispatchMode) {
+        if (targets.size === 0) return;
+        idempotencyKeyRef.current ??= newIdempotencyKey();
+        await sendTask.mutateAsync({
+          kind: "agent.task",
+          text: value,
+          targetMemberIds: [...targets],
+          idempotencyKey: idempotencyKeyRef.current,
+          ...(attachmentIds.length ? { attachmentIds } : {}),
+        });
+        idempotencyKeyRef.current = null;
+        setTargets(new Set());
+        setDispatchMode(false);
+      } else {
+        await sendText.mutateAsync({
+          text: value,
+          ...(attachmentIds.length ? { attachmentIds } : {}),
+        });
       }
+      setText("");
+      setAttachments([]);
+    } catch (cause) {
+      setError(messageOf(cause));
+    }
+  };
+
+  const toggleTarget = (memberId: string) =>
+    setTargets((previous) => {
+      const next = new Set(previous);
+      if (next.has(memberId)) next.delete(memberId);
+      else if (next.size < MAX_TARGETS) next.add(memberId);
       return next;
     });
-  };
-
-  const pending = sendText.isPending || sendTask.isPending;
 
   return (
-    <div className="border-t border-border bg-surface/60 px-4 py-3">
-      {dispatchMode && (
-        <div className="mb-2">
-          <div className="mb-1 flex items-center justify-between">
-            <span className="text-xs font-medium text-agent">
-              派发任务给 AI(最多 {MAX_TARGETS} 个)
+    <div className="border-t border-border bg-surface/96 p-3 sm:px-5 sm:py-4">
+      <div
+        className={`mx-auto max-w-5xl border transition-colors ${dispatchMode ? "border-agent/40 bg-agent/[0.035]" : "border-border bg-bg/50"}`}
+      >
+        <div className="flex items-center justify-between border-b border-border/70 px-3 py-2">
+          <div className="flex items-center gap-2">
+            <span
+              className={`size-1.5 ${dispatchMode ? "bg-agent" : "bg-human"}`}
+            />
+            <span className="font-data text-[9px] font-bold uppercase tracking-[0.12em] text-muted">
+              {dispatchMode ? "TARGETED AGENT TASK" : "ROOM MESSAGE"}
             </span>
-            <button
-              type="button"
-              onClick={() => setDispatchMode(false)}
-              className="text-xs text-muted hover:text-text"
-            >
-              取消
-            </button>
           </div>
-          {agents.length === 0 ? (
-            <p className="text-xs text-muted">
-              还没有 Agent 成员,先在上方接入你的本地 Agent。
-            </p>
-          ) : (
-            <div className="flex flex-wrap gap-1.5">
-              {agents.map((agent) => {
-                const active = targets.has(agent.id);
-                return (
-                  <button
-                    key={agent.id}
-                    type="button"
-                    onClick={() => toggleTarget(agent.id)}
-                    className={`press rounded-full border px-2.5 py-1 text-xs transition-colors ${
-                      active
-                        ? "border-agent bg-agent/15 text-agent"
-                        : "border-border text-muted hover:border-agent/40 hover:text-text"
-                    }`}
-                  >
-                    {providerLabel(agent.agentProvider)} · {agent.displayName}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
-
-      <div className="flex items-end gap-2">
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              if (dispatchMode) void handleDispatch();
-              else void handleSendText();
-            }
-          }}
-          rows={1}
-          placeholder={
-            dispatchMode
-              ? "描述要 AI 执行的任务…(Enter 发送)"
-              : "发送消息…(Enter 发送,Shift+Enter 换行)"
-          }
-          className="max-h-40 min-h-[38px] flex-1 resize-y rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-muted/60 focus:border-primary focus:outline-none"
-        />
-        {!dispatchMode && (
           <button
             type="button"
-            onClick={() => setDispatchMode(true)}
-            disabled={agents.length === 0}
-            className="press rounded-lg border border-agent/50 bg-agent/10 px-3 py-2 text-sm text-agent hover:bg-agent/15 disabled:cursor-not-allowed disabled:opacity-50"
-            title={
-              agents.length === 0
-                ? "先接入 Agent 成员"
-                : "选择 AI 目标并派发任务"
+            onClick={() => {
+              setDispatchMode((value) => !value);
+              setTargets(new Set());
+              setError(null);
+            }}
+            disabled={
+              access.isPending || (agents.length === 0 && !dispatchMode)
             }
+            className={`text-[10px] font-semibold ${dispatchMode ? "text-agent" : "text-muted hover:text-agent"}`}
           >
-            派发任务
+            {dispatchMode
+              ? "切换为普通消息"
+              : agents.length
+                ? "@ Agent 派发"
+                : "暂无可授权 Agent"}
           </button>
-        )}
-        <button
-          type="button"
-          onClick={() => (dispatchMode ? void handleDispatch() : void handleSendText())}
-          disabled={dispatchMode ? !canDispatch : !canSendText}
-          className={`press rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50 ${
-            pending ? "animate-pulse" : ""
-          }`}
-        >
-          {pending ? "发送中…" : "发送"}
-        </button>
-      </div>
+        </div>
 
-      {error && <p className="mt-2 text-xs text-danger">{error}</p>}
+        {dispatchMode && (
+          <div className="border-b border-border/70 px-3 py-3">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-[10px] font-semibold text-agent">
+                选择任务目标
+              </span>
+              <span className="font-data text-[9px] text-muted">
+                {targets.size}/{MAX_TARGETS}
+              </span>
+            </div>
+            {agents.length === 0 ? (
+              <p className="text-[11px] text-warning">
+                当前账号没有可派发 Agent。请先在 Agent 权限面板领取或获得授权。
+              </p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {agents.map((agent) => {
+                  const active = targets.has(agent.id);
+                  return (
+                    <button
+                      key={agent.id}
+                      type="button"
+                      onClick={() => toggleTarget(agent.id)}
+                      className={`inline-flex items-center gap-1.5 border px-2.5 py-1.5 text-[10px] transition-colors ${active ? "border-agent bg-agent/15 text-agent" : "border-border text-muted hover:border-agent/40 hover:text-text"}`}
+                    >
+                      <span
+                        className={`size-1.5 ${active ? "bg-agent" : "bg-border-strong"}`}
+                      />
+                      {providerLabel(agent.agentProvider)} · {agent.displayName}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        <textarea
+          ref={textareaRef}
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              void send();
+            }
+          }}
+          rows={2}
+          maxLength={8000}
+          placeholder={
+            dispatchMode
+              ? "描述任务目标、上下文和期望交付…"
+              : "发送普通聊天，不会自动唤醒 AI…"
+          }
+          className="block max-h-48 min-h-20 w-full resize-y bg-transparent px-3 py-3 text-sm leading-6 text-text outline-none placeholder:text-muted/55"
+        />
+
+        <div className="flex items-end gap-2 border-t border-border/70 px-2 py-2">
+          <AttachmentPicker
+            roomId={roomId}
+            attachments={attachments}
+            onChange={setAttachments}
+            disabled={pending}
+          />
+          <div className="min-w-0 flex-1">
+            <p className="font-data hidden text-[9px] text-muted sm:block">
+              ENTER SEND · SHIFT+ENTER NEW LINE · {text.length}/8000
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void send()}
+            disabled={dispatchMode ? !canDispatch : !canSend}
+            className="button-primary h-10 px-4 text-xs"
+          >
+            {pending ? "发送中…" : dispatchMode ? "派发任务" : "发送"}
+            <Icon name="send" size={15} />
+          </button>
+        </div>
+      </div>
+      {error && (
+        <p className="mx-auto mt-2 max-w-5xl text-[11px] text-danger">
+          {error}
+        </p>
+      )}
     </div>
   );
 }
 
 function messageOf(error: unknown): string {
   if (error instanceof ApiError) {
-    if (error.code === "IDEMPOTENCY_KEY_REUSED") {
-      return "该任务已用不同内容发送过,请换一段描述或目标重试";
-    }
+    if (error.code === "IDEMPOTENCY_KEY_REUSED")
+      return "该幂等键已被不同任务使用，请重新编辑后发送";
+    if (error.code === "AGENT_DISPATCH_NOT_AUTHORIZED")
+      return "当前账号没有目标 Agent 的派发权限";
     return error.message;
   }
-  return "发送失败,请重试";
+  return "发送失败，请重试";
 }

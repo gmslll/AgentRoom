@@ -1,27 +1,18 @@
 import { useState } from "react";
-import type { Member } from "../api/types";
 import { ApiError } from "../api/client";
-import { useRemoveMember } from "../api/hooks";
-import {
-  selectMemberGroups,
-  useMemberStore,
-} from "../stores/memberStore";
+import { useAgentAccess, useRemoveMember } from "../api/hooks";
+import type { Member } from "../api/types";
 import { providerLabel } from "../lib/provider";
+import { selectMemberGroups, useMemberStore } from "../stores/memberStore";
 import { Avatar } from "./Avatar";
+import { Icon } from "./ui/Icon";
 
 interface MemberPanelProps {
-  /** Whether the current user is the room owner (controls management affordances). */
   isOwner: boolean;
   roomId: string;
-  /** Called when the user wants to dispatch a task to a specific agent. */
   onDispatchTask?: (memberId: string) => void;
 }
 
-/**
- * Squad view: members grouped by type (humans / agents / terminals).
- * Membership and online presence are separate: every member stays listed,
- * while the status dot follows the presence snapshot and realtime events.
- */
 export function MemberPanel({
   roomId,
   isOwner,
@@ -29,6 +20,12 @@ export function MemberPanel({
 }: MemberPanelProps) {
   const { humans, agents, terminals } = useMemberStore(selectMemberGroups);
   const onlineById = useMemberStore((state) => state.onlineById);
+  const access = useAgentAccess(roomId);
+  const dispatchable = new Set(
+    (access.data?.agents ?? [])
+      .filter((entry) => entry.canDispatch)
+      .map((entry) => entry.agentMemberId),
+  );
   const removeMember = useRemoveMember(roomId);
   const [confirmMemberId, setConfirmMemberId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -43,9 +40,7 @@ export function MemberPanel({
       await removeMember.mutateAsync(memberId);
       setConfirmMemberId(null);
     } catch (cause) {
-      setError(
-        cause instanceof ApiError ? cause.message : "移出成员失败,请重试",
-      );
+      setError(cause instanceof ApiError ? cause.message : "移出成员失败");
     }
   };
 
@@ -58,19 +53,46 @@ export function MemberPanel({
       : null,
     onKick: kick,
     onlineById,
+    dispatchable,
   };
-
+  const onlineCount = Object.values(onlineById).filter(Boolean).length;
   return (
-    <div className="flex h-full flex-col gap-4 p-4">
+    <div className="space-y-6 p-4">
+      <div className="grid grid-cols-2 gap-px border border-border bg-border">
+        <div className="bg-surface p-3">
+          <p className="eyebrow text-[8px]">Members</p>
+          <p className="font-data mt-2 text-lg text-text">
+            {humans.length + agents.length + terminals.length}
+          </p>
+        </div>
+        <div className="bg-surface p-3">
+          <p className="eyebrow text-[8px]">Online</p>
+          <p className="font-data mt-2 text-lg text-primary">{onlineCount}</p>
+        </div>
+      </div>
       {error && (
-        <p className="rounded-md border border-danger/30 bg-danger/5 px-2 py-1.5 text-xs text-danger">
+        <p className="border-l-2 border-danger bg-danger/5 px-3 py-2 text-[11px] text-danger">
           {error}
         </p>
       )}
-      <MemberGroup title={`人类 (${humans.length})`} members={humans} {...shared} />
-      <MemberGroup title={`Agent (${agents.length})`} members={agents} {...shared} />
       <MemberGroup
-        title={`终端 (${terminals.length})`}
+        title="人类"
+        code="HUMAN"
+        color="human"
+        members={humans}
+        {...shared}
+      />
+      <MemberGroup
+        title="Agent"
+        code="AGENT"
+        color="agent"
+        members={agents}
+        {...shared}
+      />
+      <MemberGroup
+        title="终端"
+        code="TERM"
+        color="terminal"
         members={terminals}
         {...shared}
       />
@@ -80,6 +102,8 @@ export function MemberPanel({
 
 interface MemberGroupProps {
   title: string;
+  code: string;
+  color: "human" | "agent" | "terminal";
   members: Member[];
   isOwner: boolean;
   onDispatchTask?: (memberId: string) => void;
@@ -87,10 +111,13 @@ interface MemberGroupProps {
   removingMemberId: string | null;
   onKick: (memberId: string) => void;
   onlineById: Record<string, boolean>;
+  dispatchable: Set<string>;
 }
 
 function MemberGroup({
   title,
+  code,
+  color,
   members,
   isOwner,
   onDispatchTask,
@@ -98,83 +125,99 @@ function MemberGroup({
   removingMemberId,
   onKick,
   onlineById,
+  dispatchable,
 }: MemberGroupProps) {
-  if (members.length === 0) return null;
+  if (!members.length) return null;
+  const colorClass =
+    color === "human"
+      ? "text-human"
+      : color === "agent"
+        ? "text-agent"
+        : "text-terminal";
   return (
-    <div>
-      <h4 className="font-data mb-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted">
-        {title}
-      </h4>
-      <ul className="space-y-1">
-        {members.map((member) => (
-          <li
-            key={member.id}
-            className="flex items-center gap-2 rounded-md px-1.5 py-1 hover:bg-surface"
-          >
-            <div className="relative shrink-0">
-              <Avatar
-                displayName={member.displayName}
-                actorType={member.actorType}
-                agentProvider={member.agentProvider}
-                size="sm"
-              />
-              <span
-                title={onlineById[member.id] ? "在线" : "离线"}
-                className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-bg ${
-                  onlineById[member.id] ? "bg-terminal" : "bg-muted"
-                }`}
-              />
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm text-text">{member.displayName}</p>
-              <p
-                className={`font-data text-[10px] uppercase tracking-[0.14em] ${
-                  onlineById[member.id] ? "text-terminal" : "text-muted"
-                }`}
-              >
-                {onlineById[member.id] ? "在线" : "离线"}
-              </p>
-              {member.role === "owner" && (
-                <p className="font-data text-[10px] uppercase tracking-[0.14em] text-primary">
-                  房主
-                </p>
-              )}
-              {member.actorType === "agent" && (
-                <p className="font-data text-[10px] uppercase tracking-[0.14em] text-agent">
-                  {providerLabel(member.agentProvider)}
-                </p>
-              )}
-            </div>
-            {member.actorType === "agent" && onDispatchTask && (
-              <button
-                type="button"
-                onClick={() => onDispatchTask(member.id)}
-                className="rounded border border-border px-1.5 py-0.5 text-[11px] text-muted transition-colors hover:border-primary/50 hover:text-primary"
-              >
-                派发任务
-              </button>
-            )}
-            {isOwner && member.role !== "owner" && (
-              <button
-                type="button"
-                onClick={() => onKick(member.id)}
-                disabled={removingMemberId === member.id}
-                className={`rounded border px-1.5 py-0.5 text-[11px] transition-colors disabled:opacity-50 ${
-                  confirmMemberId === member.id
-                    ? "border-danger bg-danger/10 text-danger"
-                    : "border-border text-muted hover:border-danger/50 hover:text-danger"
-                }`}
-              >
-                {removingMemberId === member.id
-                  ? "移出中…"
-                  : confirmMemberId === member.id
-                    ? "确认移出"
-                    : "移出"}
-              </button>
-            )}
-          </li>
-        ))}
+    <section>
+      <div className="mb-2 flex items-center justify-between">
+        <h4 className={`eyebrow text-[9px] ${colorClass}`}>
+          {code} / {title}
+        </h4>
+        <span className="font-data text-[9px] text-muted">
+          {members.length}
+        </span>
+      </div>
+      <ul className="space-y-1.5">
+        {members.map((member) => {
+          const online = Boolean(onlineById[member.id]);
+          const canDispatch =
+            member.actorType === "agent" && dispatchable.has(member.id);
+          return (
+            <li
+              key={member.id}
+              className="group border border-transparent bg-bg/35 p-2.5 transition-colors hover:border-border hover:bg-surface-raised"
+            >
+              <div className="flex items-start gap-2.5">
+                <div className="relative">
+                  <Avatar
+                    displayName={member.displayName}
+                    actorType={member.actorType}
+                    agentProvider={member.agentProvider}
+                    size="sm"
+                  />
+                  <span
+                    className={`absolute -bottom-0.5 -right-0.5 size-2.5 border-2 border-surface ${online ? "animate-pulse-signal bg-primary" : "bg-border-strong"}`}
+                  />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-xs font-semibold text-text">
+                    {member.displayName}
+                  </p>
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5 font-data text-[8px] uppercase text-muted">
+                    <span>{online ? "online" : "offline"}</span>
+                    {member.role === "owner" && (
+                      <span className="text-primary">owner</span>
+                    )}
+                    {member.actorType === "agent" && (
+                      <span className="text-agent">
+                        {providerLabel(member.agentProvider)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {canDispatch && onDispatchTask && (
+                  <button
+                    type="button"
+                    onClick={() => onDispatchTask(member.id)}
+                    className="border border-agent/30 px-2 py-1 text-[9px] text-agent hover:bg-agent/10"
+                  >
+                    <Icon name="send" size={10} className="mr-1 inline" />
+                    派发
+                  </button>
+                )}
+                {member.actorType === "agent" && !canDispatch && (
+                  <span className="border border-border px-2 py-1 text-[8px] text-muted">
+                    未授权
+                  </span>
+                )}
+                {isOwner && member.role !== "owner" && (
+                  <button
+                    type="button"
+                    onClick={() => onKick(member.id)}
+                    disabled={removingMemberId === member.id}
+                    className={`border px-2 py-1 text-[9px] ${confirmMemberId === member.id ? "border-danger bg-danger/10 text-danger" : "border-border text-muted hover:text-danger"}`}
+                  >
+                    {removingMemberId === member.id
+                      ? "移出中"
+                      : confirmMemberId === member.id
+                        ? "确认移出"
+                        : "移出"}
+                  </button>
+                )}
+              </div>
+            </li>
+          );
+        })}
       </ul>
-    </div>
+    </section>
   );
 }

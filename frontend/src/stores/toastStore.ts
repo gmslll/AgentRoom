@@ -31,8 +31,10 @@ export const useToastStore = create<ToastState>()((set) => ({
 
 /** Push an error toast from any error-shaped value. */
 export function toastError(error: unknown, fallback = "操作失败"): void {
-  useToastStore.getState().push(
-    error instanceof Error && error.message ? error.message : fallback,
-    "error",
-  );
+  useToastStore
+    .getState()
+    .push(
+      error instanceof Error && error.message ? error.message : fallback,
+      "error",
+    );
 }

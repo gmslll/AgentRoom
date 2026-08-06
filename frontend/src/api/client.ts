@@ -1,7 +1,8 @@
 import type { ApiErrorBody } from "./types";
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined)
-  ?.replace(/\/+$/, "");
+const API_BASE_URL = (
+  import.meta.env.VITE_API_BASE_URL as string | undefined
+)?.replace(/\/+$/, "");
 
 /**
  * Base URL for API requests. The Vite dev server proxies nothing by default;

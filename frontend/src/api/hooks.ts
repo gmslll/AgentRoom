@@ -1,24 +1,50 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { getMe, login, logout, register } from "./auth";
 import {
+  changePassword,
+  getMe,
+  login,
+  logout,
+  register,
+  requestEmailVerification,
+  requestPasswordReset,
+  resetPassword,
+  verifyEmail,
+} from "./auth";
+import {
+  claimAgent,
+  completeFileUpload,
+  createModerationRule,
+  createUploadIntent,
   createRoom,
+  deleteModerationRule,
   dissolveRoom,
+  getAgentAccess,
+  getAttachment,
   getConnector,
+  grantAgentToUser,
   joinRoom,
+  listAttachments,
   listMembers,
   listMessages,
+  listModerationRules,
   listPresence,
   listPublicRooms,
   listRooms,
   removeRoomMember,
+  requestAgentCollaboration,
+  respondToAgentCollaboration,
+  revokeAgentCollaboration,
+  revokeAgentGrant,
   rotateInvite,
   sendMessage,
+  uploadToPresignedUrl,
   updateRoom,
 } from "./rooms";
 import { ApiError } from "./client";
 import type {
   AgentTaskInput,
+  ModerationAction,
   LoginInput,
   Message,
   RegisterInput,
@@ -40,6 +66,11 @@ const AUTH_KEYS = {
   presence: (roomId: string) => ["rooms", roomId, "presence"] as const,
   connector: (roomId: string) => ["rooms", roomId, "connector"] as const,
   messages: (roomId: string) => ["rooms", roomId, "messages"] as const,
+  agentAccess: (roomId: string) => ["rooms", roomId, "agent-access"] as const,
+  attachment: (roomId: string, attachmentId: string) =>
+    ["rooms", roomId, "attachments", attachmentId] as const,
+  attachments: (roomId: string) => ["rooms", roomId, "attachments"] as const,
+  moderation: (roomId: string) => ["rooms", roomId, "moderation"] as const,
 };
 
 /**
@@ -100,6 +131,44 @@ export function useLogout() {
       void queryClient.clear();
       navigate("/login", { replace: true });
     },
+  });
+}
+
+export function useRequestEmailVerification() {
+  const token = useAuthToken();
+  return useMutation({
+    mutationFn: () => requestEmailVerification(token as string),
+  });
+}
+
+export function useVerifyEmail() {
+  const token = useAuthToken();
+  const setUser = useTokenStore((state) => state.setUser);
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (code: string) => verifyEmail(token as string, code),
+    onSuccess: ({ user }) => {
+      setUser(user);
+      queryClient.setQueryData(AUTH_KEYS.me, { user });
+    },
+  });
+}
+
+export function useRequestPasswordReset() {
+  return useMutation({
+    mutationFn: (email: string) => requestPasswordReset(email),
+  });
+}
+
+export function useResetPassword() {
+  return useMutation({ mutationFn: resetPassword });
+}
+
+export function useChangePassword() {
+  const token = useAuthToken();
+  return useMutation({
+    mutationFn: (input: { currentPassword: string; newPassword: string }) =>
+      changePassword(token as string, input),
   });
 }
 
@@ -251,6 +320,106 @@ export function useConnector(roomId: string, enabled = true) {
   });
 }
 
+export function useAgentAccess(roomId: string, enabled = true) {
+  const token = useAuthToken();
+  return useQuery({
+    queryKey: AUTH_KEYS.agentAccess(roomId),
+    queryFn: () => getAgentAccess(token as string, roomId),
+    enabled: Boolean(token) && Boolean(roomId) && enabled,
+    retry: false,
+  });
+}
+
+function useInvalidateAgentAccess(roomId: string) {
+  const queryClient = useQueryClient();
+  return async () => {
+    await queryClient.invalidateQueries({
+      queryKey: AUTH_KEYS.agentAccess(roomId),
+    });
+  };
+}
+
+export function useClaimAgent(roomId: string) {
+  const token = useAuthToken();
+  const invalidate = useInvalidateAgentAccess(roomId);
+  return useMutation({
+    mutationFn: (input: { agentId: string; claimCode: string }) =>
+      claimAgent(token as string, roomId, input.agentId, input.claimCode),
+    onSuccess: invalidate,
+  });
+}
+
+export function useGrantAgent(roomId: string) {
+  const token = useAuthToken();
+  const invalidate = useInvalidateAgentAccess(roomId);
+  return useMutation({
+    mutationFn: (input: { agentId: string; granteeMemberId: string }) =>
+      grantAgentToUser(
+        token as string,
+        roomId,
+        input.agentId,
+        input.granteeMemberId,
+      ),
+    onSuccess: invalidate,
+  });
+}
+
+export function useRevokeAgentGrant(roomId: string) {
+  const token = useAuthToken();
+  const invalidate = useInvalidateAgentAccess(roomId);
+  return useMutation({
+    mutationFn: (input: { agentId: string; grantId: string }) =>
+      revokeAgentGrant(token as string, roomId, input.agentId, input.grantId),
+    onSuccess: invalidate,
+  });
+}
+
+export function useRequestAgentCollaboration(roomId: string) {
+  const token = useAuthToken();
+  const invalidate = useInvalidateAgentAccess(roomId);
+  return useMutation({
+    mutationFn: (input: {
+      requesterAgentMemberId: string;
+      targetAgentMemberId: string;
+    }) =>
+      requestAgentCollaboration(
+        token as string,
+        roomId,
+        input.requesterAgentMemberId,
+        input.targetAgentMemberId,
+      ),
+    onSuccess: invalidate,
+  });
+}
+
+export function useRespondAgentCollaboration(roomId: string) {
+  const token = useAuthToken();
+  const invalidate = useInvalidateAgentAccess(roomId);
+  return useMutation({
+    mutationFn: (input: {
+      collaborationId: string;
+      action: "accept" | "reject";
+    }) =>
+      respondToAgentCollaboration(
+        token as string,
+        roomId,
+        input.collaborationId,
+        input.action,
+      ),
+    onSuccess: invalidate,
+  });
+}
+
+export function useRevokeAgentCollaboration(roomId: string) {
+  const token = useAuthToken();
+  const invalidate = useInvalidateAgentAccess(roomId);
+  return useMutation({
+    mutationFn: (collaborationId: string) =>
+      revokeAgentCollaboration(token as string, roomId, collaborationId),
+    onSuccess: invalidate,
+  });
+}
+
 export function useRotateInvite(roomId: string) {
   const token = useAuthToken();
   const queryClient = useQueryClient();
@@ -310,14 +479,25 @@ export function useSendText(roomId: string) {
   const token = useAuthToken();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: { text: string }): Promise<SendMessageResult> => {
-      const body: TextMessageInput = { kind: "text", text: input.text };
+    mutationFn: (input: {
+      text: string;
+      attachmentIds?: string[];
+    }): Promise<SendMessageResult> => {
+      const body: TextMessageInput = {
+        kind: "text",
+        text: input.text,
+        ...(input.attachmentIds?.length
+          ? { attachmentIds: input.attachmentIds }
+          : {}),
+      };
       return sendMessage(token as string, roomId, body);
     },
     onSuccess: (result) => {
       useMessageStore.getState().upsertMessages([result.message]);
       useDeliveryStore.getState().upsertDeliveries(result.deliveries);
-      void queryClient.invalidateQueries({ queryKey: AUTH_KEYS.messages(roomId) });
+      void queryClient.invalidateQueries({
+        queryKey: AUTH_KEYS.messages(roomId),
+      });
     },
   });
 }
@@ -331,7 +511,86 @@ export function useSendTask(roomId: string) {
     onSuccess: (result) => {
       useMessageStore.getState().upsertMessages([result.message]);
       useDeliveryStore.getState().upsertDeliveries(result.deliveries);
-      void queryClient.invalidateQueries({ queryKey: AUTH_KEYS.messages(roomId) });
+      void queryClient.invalidateQueries({
+        queryKey: AUTH_KEYS.messages(roomId),
+      });
     },
+  });
+}
+
+export function useUploadAttachment(roomId: string) {
+  const token = useAuthToken();
+  return useMutation({
+    mutationFn: async (file: File) => {
+      const mediaType = file.type || "application/octet-stream";
+      const intent = await createUploadIntent(token as string, roomId, {
+        name: file.name,
+        mediaType,
+        size: file.size,
+      });
+      await uploadToPresignedUrl(intent.presignedUrl, file);
+      return completeFileUpload(token as string, roomId, intent.fileId);
+    },
+  });
+}
+
+export function useAttachment(
+  roomId: string,
+  attachmentId: string,
+  enabled: boolean,
+) {
+  const token = useAuthToken();
+  return useQuery({
+    queryKey: AUTH_KEYS.attachment(roomId, attachmentId),
+    queryFn: () => getAttachment(token as string, roomId, attachmentId),
+    enabled: Boolean(token) && enabled,
+    staleTime: 45_000,
+    gcTime: 5 * 60_000,
+  });
+}
+
+export function useRoomAttachments(roomId: string, enabled: boolean) {
+  const token = useAuthToken();
+  return useQuery({
+    queryKey: AUTH_KEYS.attachments(roomId),
+    queryFn: () => listAttachments(token as string, roomId),
+    enabled: Boolean(token) && enabled,
+  });
+}
+
+export function useModerationRules(roomId: string, enabled: boolean) {
+  const token = useAuthToken();
+  return useQuery({
+    queryKey: AUTH_KEYS.moderation(roomId),
+    queryFn: () => listModerationRules(token as string, roomId),
+    enabled: Boolean(token) && enabled,
+    retry: false,
+  });
+}
+
+export function useCreateModerationRule(roomId: string) {
+  const token = useAuthToken();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { pattern: string; action: ModerationAction }) =>
+      createModerationRule(
+        token as string,
+        roomId,
+        input.pattern,
+        input.action,
+      ),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: AUTH_KEYS.moderation(roomId) }),
+  });
+}
+
+export function useDeleteModerationRule(roomId: string) {
+  const token = useAuthToken();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (ruleId: string) =>
+      deleteModerationRule(token as string, roomId, ruleId),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: AUTH_KEYS.moderation(roomId) }),
   });
 }

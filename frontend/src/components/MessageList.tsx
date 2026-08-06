@@ -33,8 +33,8 @@ export function MessageList({
   );
 
   return (
-    <div ref={scrollRef} className="h-full overflow-y-auto">
-      <div className="py-3">
+    <div ref={scrollRef} className="h-full overflow-y-auto bg-bg/25">
+      <div className="signal-rule relative mx-auto max-w-5xl py-5">
         {hasOlder && (
           <div className="flex justify-center pb-2">
             <button
@@ -48,9 +48,15 @@ export function MessageList({
           </div>
         )}
         {messages.length === 0 ? (
-          <p className="px-4 py-8 text-center text-sm text-muted">
-            还没有消息。发送一条消息,或从右侧面板接入你的本地 Agent。
-          </p>
+          <div className="mx-4 my-12 border border-dashed border-border px-6 py-12 text-center sm:mx-6">
+            <p className="eyebrow">No room traffic</p>
+            <p className="mt-3 text-sm font-semibold text-text">
+              这条信号线上还没有消息
+            </p>
+            <p className="mt-1 text-xs text-muted">
+              发送普通消息，或从接入面板连接本地 Agent。
+            </p>
+          </div>
         ) : (
           messages.map((message: Message) => (
             <MessageBubble

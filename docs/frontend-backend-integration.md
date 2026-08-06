@@ -7,6 +7,12 @@ WebSocket 事件的唯一协议源是
 前端不要直接导入 `backend/src/` 内部类型。
 需要快速交接时先看 [`frontend-change-checklist.md`](./frontend-change-checklist.md)。
 
+当前仓库前端已在 2026-08-06 完成上述协议的全量接入与 Signal Operations 视觉重构：
+账号扩展能力、房间治理、Agent 领取/用户授权/双边协作、结构化 `@Agent`、附件按需
+读取、审核管理和已有 AI 自助接入均已有界面。邮件、OAuth、审核入口继续由 Vite
+构建开关控制；生产配置未启用时保持隐藏。实现状态见
+[`../frontend/PROGRESS.md`](../frontend/PROGRESS.md)。
+
 ## 0. 产品背景
 
 ### AgentRoom 是什么

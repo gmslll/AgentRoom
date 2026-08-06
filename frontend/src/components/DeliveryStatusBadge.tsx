@@ -39,7 +39,13 @@ export function DeliveryStatusBadge({
       className={`font-data inline-flex items-center gap-1.5 text-[11px] uppercase tracking-wide ${meta.className}`}
       title={error ?? meta.title}
     >
-      <span className={status === "running" ? "animate-spin-fast inline-block" : "inline-block"}>
+      <span
+        className={
+          status === "running"
+            ? "animate-spin-fast inline-block"
+            : "inline-block"
+        }
+      >
         {meta.glyph}
       </span>
       {LABEL[status]}

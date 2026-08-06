@@ -19,7 +19,15 @@ export interface RealTimeHandlers {
   onRoomUpdated?: (room: Room) => void;
   onRoomDissolved?: () => void;
   onMemberPresence?: (presence: MemberPresence) => void;
+  /** Transport state for the room header; message writes still use HTTP. */
+  onConnectionState?: (state: RealTimeConnectionState) => void;
 }
+
+export type RealTimeConnectionState =
+  | "connecting"
+  | "connected"
+  | "reconnecting"
+  | "disconnected";
 
 /** Minimal WebSocket surface the client relies on (injectable in tests). */
 export interface WebSocketLike {
@@ -72,6 +80,7 @@ export class RealTimeClient {
 
   connect(): void {
     if (this.closed || this.ws) return;
+    this.options.handlers.onConnectionState?.("connecting");
     void this.open();
   }
 
@@ -80,6 +89,7 @@ export class RealTimeClient {
     this.clearTimers();
     this.ws?.close();
     this.ws = null;
+    this.options.handlers.onConnectionState?.("disconnected");
   }
 
   private async open(): Promise<void> {
@@ -93,8 +103,7 @@ export class RealTimeClient {
     }
 
     const url = this.buildUrl(ticket);
-    const ws =
-      this.options.webSocketFactory?.(url) ?? new WebSocket(url);
+    const ws = this.options.webSocketFactory?.(url) ?? new WebSocket(url);
     this.ws = ws;
     ws.onopen = () => this.handleOpen();
     ws.onmessage = (event) => this.handleMessage(event);
@@ -115,6 +124,7 @@ export class RealTimeClient {
     // A successful connection resets the backoff sequence.
     this.reconnectDelayMs = this.initialReconnectDelayMs;
     this.clearHeartbeat();
+    this.options.handlers.onConnectionState?.("connected");
     this.heartbeatTimer = setInterval(() => {
       this.ws?.send(JSON.stringify({ type: "ping" }));
     }, this.heartbeatMs);
@@ -139,12 +149,12 @@ export class RealTimeClient {
         this.options.handlers.onMessageCreated(data?.message as Message);
         break;
       case "delivery.updated":
-        this.options.handlers.onDeliveryUpdated(data?.delivery as AgentDelivery);
+        this.options.handlers.onDeliveryUpdated(
+          data?.delivery as AgentDelivery,
+        );
         break;
       case "member.removed":
-        this.options.handlers.onMemberRemoved(
-          data?.memberId as string,
-        );
+        this.options.handlers.onMemberRemoved(data?.memberId as string);
         break;
       case "member.presence":
         this.options.handlers.onMemberPresence?.({
@@ -176,6 +186,7 @@ export class RealTimeClient {
 
   private scheduleReconnect(): void {
     if (this.closed || this.reconnectTimer !== null) return;
+    this.options.handlers.onConnectionState?.("reconnecting");
     const delay = this.reconnectDelayMs;
     this.reconnectDelayMs = Math.min(
       this.reconnectDelayMs * 2,

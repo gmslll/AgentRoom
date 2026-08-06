@@ -3,9 +3,7 @@
  * attempt and reused across network retries so the backend can deduplicate.
  */
 export function newIdempotencyKey(prefix = "task"): string {
-  const uuid = crypto.randomUUID
-    ? crypto.randomUUID()
-    : randomUuidFallback();
+  const uuid = crypto.randomUUID ? crypto.randomUUID() : randomUuidFallback();
   return `${prefix}_${uuid}`;
 }
 

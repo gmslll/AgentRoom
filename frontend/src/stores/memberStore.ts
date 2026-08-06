@@ -64,8 +64,7 @@ export const useMemberStore = create<MemberState>()((set) => ({
     set((state) => ({
       onlineById: { ...state.onlineById, [memberId]: online },
     })),
-  reset: () =>
-    set({ byId: {}, groups: EMPTY_GROUPS, onlineById: {} }),
+  reset: () => set({ byId: {}, groups: EMPTY_GROUPS, onlineById: {} }),
 }));
 
 /** Stable selector: the grouped view reference only changes when members change. */

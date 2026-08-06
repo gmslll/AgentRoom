@@ -31,6 +31,7 @@ export interface Account {
   email: string;
   displayName: string;
   createdAt: string;
+  emailVerifiedAt?: string | null;
 }
 
 export interface AccountAccess {
@@ -49,6 +50,8 @@ export interface LoginInput {
   email: string;
   password: string;
 }
+
+export type OAuthProvider = "google" | "github";
 
 // ---------------------------------------------------------------------------
 // Rooms and members
@@ -128,6 +131,52 @@ export interface RotateInviteResponse extends ConnectorResponse {
   inviteCode: string;
 }
 
+export interface AgentClaim {
+  code: string;
+  expiresAt: string;
+}
+
+export interface AgentOwnership {
+  agentMemberId: string;
+  claimedAt: string;
+}
+
+export interface AgentUserGrant {
+  id: string;
+  roomId: string;
+  agentMemberId: string;
+  granteeMemberId: string;
+  createdAt: string;
+}
+
+export type AgentCollaborationStatus =
+  | "pending"
+  | "active"
+  | "rejected"
+  | "revoked";
+
+export interface AgentCollaboration {
+  id: string;
+  roomId: string;
+  requesterAgentMemberId: string;
+  targetAgentMemberId: string;
+  status: AgentCollaborationStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AgentAccessEntry {
+  agentMemberId: string;
+  ownedByMe: boolean;
+  canDispatch: boolean;
+}
+
+export interface AgentAccessOverview {
+  agents: AgentAccessEntry[];
+  grants: AgentUserGrant[];
+  collaborations: AgentCollaboration[];
+}
+
 // ---------------------------------------------------------------------------
 // Messages and deliveries
 // ---------------------------------------------------------------------------
@@ -162,6 +211,7 @@ export interface Message {
 export interface TextMessageInput {
   kind: "text";
   text: string;
+  attachmentIds?: string[];
 }
 
 export interface AgentTaskInput {
@@ -169,6 +219,7 @@ export interface AgentTaskInput {
   text: string;
   targetMemberIds: string[];
   idempotencyKey: string;
+  attachmentIds?: string[];
 }
 
 export type MessageInput = TextMessageInput | AgentTaskInput;
@@ -192,6 +243,45 @@ export interface SendMessageResult {
 export interface MessageListResult {
   items: Message[];
   nextAfterSequence: number;
+}
+
+// ---------------------------------------------------------------------------
+// Files and moderation
+// ---------------------------------------------------------------------------
+
+export type AttachmentScanState = "pending" | "clean" | "flagged";
+
+export interface Attachment {
+  id: string;
+  roomId: string;
+  uploaderMemberId: string;
+  name: string;
+  mediaType: string;
+  size: number;
+  sha256: string;
+  scanState: AttachmentScanState;
+  createdAt: string;
+}
+
+export interface UploadIntent {
+  fileId: string;
+  presignedUrl: string;
+  expiresAt: string;
+}
+
+export interface ResolvedAttachment {
+  attachment: Attachment;
+  downloadUrl: string;
+}
+
+export type ModerationAction = "flag" | "reject";
+
+export interface ModerationRule {
+  id: string;
+  roomId: string;
+  pattern: string;
+  action: ModerationAction;
+  createdAt: string;
 }
 
 // ---------------------------------------------------------------------------

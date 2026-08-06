@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { copyText } from "../lib/copy";
+import { Icon } from "./ui/Icon";
 
 interface CopyButtonProps {
   text: string;
@@ -33,10 +34,11 @@ export function CopyButton({
     <button
       type="button"
       onClick={handleCopy}
-      className={`press inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs transition-colors hover:border-border-strong hover:bg-surface-raised ${
-        copied ? "border-terminal/60 text-terminal" : "text-muted"
+      className={`press inline-flex min-h-8 items-center gap-1.5 border border-border bg-surface-raised/70 px-2 py-1 text-[10px] font-semibold transition-colors hover:border-border-strong hover:bg-surface-soft ${
+        copied ? "border-primary/60 text-primary" : "text-muted"
       } ${className ?? ""}`}
     >
+      <Icon name={copied ? "check" : "copy"} size={12} />
       {copied ? "已复制" : label}
     </button>
   );

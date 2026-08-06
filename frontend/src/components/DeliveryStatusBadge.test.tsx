@@ -4,7 +4,9 @@ import { DeliveryStatusBadge } from "./DeliveryStatusBadge";
 
 describe("DeliveryStatusBadge", () => {
   it("renders checklist-compliant labels for every status", () => {
-    const cases: Array<[Parameters<typeof DeliveryStatusBadge>[0]["status"], string]> = [
+    const cases: Array<
+      [Parameters<typeof DeliveryStatusBadge>[0]["status"], string]
+    > = [
       ["queued", "等待终端"],
       ["received", "已送达终端"],
       ["running", "AI 处理中"],

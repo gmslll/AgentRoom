@@ -8,9 +8,9 @@ export function createInstallerCommands(
   );
 
   return {
-    macosLinux: `curl -fsSL ${quotePosix(installerUrl(installers.macosLinuxUrl))} | sh`,
-    windowsPowerShell: `irm ${windowsInstallerUrl} | iex`,
-    windowsCmd: `powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Invoke-Expression (Invoke-RestMethod ${windowsInstallerUrl})"`,
+    macosLinux: `curl -fL -o agentroom-install.sh ${quotePosix(installerUrl(installers.macosLinuxUrl))} && sh agentroom-install.sh`,
+    windowsPowerShell: `Invoke-WebRequest ${windowsInstallerUrl} -OutFile agentroom-install.ps1; powershell -ExecutionPolicy Bypass -File .\\agentroom-install.ps1`,
+    windowsCmd: `powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Invoke-WebRequest ${windowsInstallerUrl} -OutFile agentroom-install.ps1; powershell -ExecutionPolicy Bypass -File .\\agentroom-install.ps1"`,
   };
 }
 

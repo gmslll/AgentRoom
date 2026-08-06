@@ -14,7 +14,7 @@ interface AvatarProps {
   size?: "sm" | "md";
 }
 
-/** Round initial badge with a semantic-color ring; no glow. */
+/** Compact signal-node badge with a semantic actor color. */
 export function Avatar({
   displayName,
   actorType,
@@ -29,7 +29,7 @@ export function Avatar({
       : initial;
   return (
     <div
-      className={`inline-flex shrink-0 items-center justify-center rounded-full border font-semibold ${dims} ${RING[actorType]}`}
+      className={`inline-flex shrink-0 items-center justify-center border font-data font-semibold shadow-[0_0_18px_rgba(0,0,0,.14)] ${dims} ${RING[actorType]}`}
       title={`${displayName} (${actorType})`}
     >
       {badge}

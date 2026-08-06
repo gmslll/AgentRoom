@@ -5,19 +5,18 @@ describe("ConnectPanel installer commands", () => {
   it("builds copyable commands from backend-provided installer URLs", () => {
     expect(
       createInstallerCommands({
-        manifestUrl: "https://try-status.online/api/downloads/cli/manifest.json",
-        macosLinuxUrl:
-          "https://try-status.online/api/downloads/cli/install.sh",
-        windowsUrl:
-          "https://try-status.online/api/downloads/cli/install.ps1",
+        manifestUrl:
+          "https://try-status.online/api/downloads/cli/manifest.json",
+        macosLinuxUrl: "https://try-status.online/api/downloads/cli/install.sh",
+        windowsUrl: "https://try-status.online/api/downloads/cli/install.ps1",
       }),
     ).toEqual({
       macosLinux:
-        "curl -fsSL 'https://try-status.online/api/downloads/cli/install.sh' | sh",
+        "curl -fL -o agentroom-install.sh 'https://try-status.online/api/downloads/cli/install.sh' && sh agentroom-install.sh",
       windowsPowerShell:
-        "irm 'https://try-status.online/api/downloads/cli/install.ps1' | iex",
+        "Invoke-WebRequest 'https://try-status.online/api/downloads/cli/install.ps1' -OutFile agentroom-install.ps1; powershell -ExecutionPolicy Bypass -File .\\agentroom-install.ps1",
       windowsCmd:
-        'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Invoke-Expression (Invoke-RestMethod \'https://try-status.online/api/downloads/cli/install.ps1\')"',
+        "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"Invoke-WebRequest 'https://try-status.online/api/downloads/cli/install.ps1' -OutFile agentroom-install.ps1; powershell -ExecutionPolicy Bypass -File .\\agentroom-install.ps1\"",
     });
   });
 
@@ -30,11 +29,11 @@ describe("ConnectPanel installer commands", () => {
       }),
     ).toEqual({
       macosLinux:
-        "curl -fsSL 'http://localhost:3000/api/downloads/cli/install.sh' | sh",
+        "curl -fL -o agentroom-install.sh 'http://localhost:3000/api/downloads/cli/install.sh' && sh agentroom-install.sh",
       windowsPowerShell:
-        "irm 'http://localhost:3000/api/downloads/cli/install.ps1' | iex",
+        "Invoke-WebRequest 'http://localhost:3000/api/downloads/cli/install.ps1' -OutFile agentroom-install.ps1; powershell -ExecutionPolicy Bypass -File .\\agentroom-install.ps1",
       windowsCmd:
-        'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Invoke-Expression (Invoke-RestMethod \'http://localhost:3000/api/downloads/cli/install.ps1\')"',
+        "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"Invoke-WebRequest 'http://localhost:3000/api/downloads/cli/install.ps1' -OutFile agentroom-install.ps1; powershell -ExecutionPolicy Bypass -File .\\agentroom-install.ps1\"",
     });
   });
 });

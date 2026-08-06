@@ -108,6 +108,7 @@ function makeClient(overrides: { heartbeatMs?: number } = {}) {
     onMemberPresence: vi.fn(),
     onRoomUpdated: vi.fn(),
     onRoomDissolved: vi.fn(),
+    onConnectionState: vi.fn(),
   };
   const getTicket = vi.fn().mockResolvedValue({
     ticket: "arrt_1",
@@ -130,13 +131,17 @@ beforeEach(() => {
 
 describe("RealTimeClient", () => {
   it("connects with a ticket from the API", async () => {
-    const { client, getTicket } = makeClient();
+    const { client, getTicket, handlers } = makeClient();
     client.connect();
+    expect(handlers.onConnectionState).toHaveBeenCalledWith("connecting");
     await tick(10);
     expect(getTicket).toHaveBeenCalledTimes(1);
     expect(FakeWebSocket.instances).toHaveLength(1);
     expect(FakeWebSocket.instances[0].url).toContain("ticket=arrt_1");
+    FakeWebSocket.instances[0].open();
+    expect(handlers.onConnectionState).toHaveBeenCalledWith("connected");
     client.disconnect();
+    expect(handlers.onConnectionState).toHaveBeenCalledWith("disconnected");
   });
 
   it("dispatches realtime events to the handlers", async () => {
@@ -198,12 +203,13 @@ describe("RealTimeClient", () => {
   });
 
   it("reconnects with a fresh ticket after the socket closes", async () => {
-    const { client, getTicket } = makeClient();
+    const { client, getTicket, handlers } = makeClient();
     client.connect();
     await tick(10);
     expect(FakeWebSocket.instances).toHaveLength(1);
 
     FakeWebSocket.instances[0].close();
+    expect(handlers.onConnectionState).toHaveBeenCalledWith("reconnecting");
     await tick(30);
 
     expect(getTicket).toHaveBeenCalledTimes(2);
