@@ -9,11 +9,11 @@ const STYLE: Record<DeliveryStatus, string> = {
 };
 
 const LABEL: Record<DeliveryStatus, string> = {
-  queued: "等待中",
-  received: "已接收",
-  running: "执行中",
-  replied: "已完成",
-  failed: "失败",
+  queued: "等待终端",
+  received: "已送达终端",
+  running: "AI 处理中",
+  replied: "已回复",
+  failed: "执行失败",
 };
 
 interface DeliveryStatusBadgeProps {

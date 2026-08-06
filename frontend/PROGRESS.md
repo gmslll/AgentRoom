@@ -17,16 +17,20 @@
 | 页面 | ✅ | `/login`(登录/注册 tab,RHF+Zod)、`/rooms`(列表+创建+登出)、`/rooms/:roomId`(三栏:房间列表/消息流+composer/成员+接入面板;邀请码加入表单) |
 | 消息流 | ✅ | 三类消息渲染:text 平铺 / `agent.task` 任务卡+delivery 状态条(queued→running 动画→replied/failed)/ `agent.reply` 紫色竖线可折叠;`message.id` 去重、`sequence` 排序 |
 | 任务派发 | ✅ | 仅 owner;`TaskComposer` 多选目标 agent(≤10);幂等键首次点击生成(UUID),网络重试复用,`IDEMPOTENCY_KEY_REUSED` 按 code 提示 |
-| 接入引导 | ✅ | `ConnectPanel`:安装器链接(macOS/Linux/Windows 直连 `connector.installers`,不前端拼装)、新会话/已有会话复制(`connector.command`/`attachCommand`)、邀请码显示+旋转(提示旧码失效)、「等待 Agent 加入」态(复制命令后置起,收到 agent `member.joined` 清除) |
-| 测试 | ✅ | 14 个单测:幂等键、messageStore 去重/排序/水位、memberStore 分组+引用稳定性、RealTimeClient 连接/事件分发/心跳/断线重连 |
+| 接入引导 | ✅ | `ConnectPanel`:安装命令卡片(macOS/Linux、Windows,URL 取自 `connector.installers`)、新会话/已有会话复制(`connector.command`/`attachCommand`)、邀请码显示+旋转(提示旧码失效)、**复制邀请链接**、「等待 Agent 加入」态 |
+| 成员管理 | ✅ | `MemberPanel` 分组视图 + **presence 在线点**(数据驱动,不猜在线);owner 可**移除成员**(`DELETE /members/{memberId}`),禁止移除 owner/自己;自己收到 `member.removed` 时关闭 WS、清理房间状态并返回列表 |
+| presence | ✅ | `GET /presence` 快照 + `member.presence` 实时事件 → `memberStore.onlineById` |
+| delivery 文案 | ✅ | 对照 checklist:`queued` 等待终端 / `received` 已送达终端 / `running` AI 处理中 / `replied` 已回复 / `failed` 执行失败(`received` ≠「AI 已读」) |
+| 测试 | ✅ | 19 个单测:幂等键、messageStore、memberStore(分组+引用稳定性+presence)、RealTimeClient 生命周期、DeliveryStatusBadge 文案、ConnectPanel(协作者) |
 
 ## 已知占位 / 待办 🔶
 
 - **上翻加载更早消息**:`MessageList` 的 `onLoadOlder` 目前空操作;规格要求 `afterSequence=0` 正向累积(最多 4 页 200 条),尚未实现。
-- **「转派给…」接力**:`agent.reply` 上「从结果再派发」交互未实现(规格 §7)。
+- **「转派给…」接力**:`agent.reply` 上「从结果再派发」交互未实现(规格 §7;relay 表现为新任务消息,前端不做正文解析)。
 - **MemberPanel「派发任务」回调**:`onDispatchTask` prop 已定义但 `RoomPage` 未接线(目前统一走 `TaskComposer`)。
-- **presence 事件**:handler 已接(`member.presence`),UI 未使用(MVP 不显示在线点,符合规格)。
-- **接入引导空态**:无 agent 时中栏直接渲染 `ConnectPanel`,视觉可再打磨;有 agent 后引导缩为右栏 tab(规格 §6 建议右上角按钮,当前实现为右栏切换)。
+- **接入引导空态**:无 agent 时中栏直接渲染 `ConnectPanel`,视觉可再打磨;有 agent 后引导缩为右栏 tab。
+- **移除成员的错误反馈**:`useRemoveMember` 失败时仅有后端 message,无 toast。
+- **404/503 全局业务提示**(规格 §10 建议):目前只做了 401 会话失效。
 
 ## 明确不做(规格 §14,MVP 范围外)
 

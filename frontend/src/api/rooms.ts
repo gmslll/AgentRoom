@@ -5,6 +5,7 @@ import type {
   CreatedRoomAccess,
   JoinRoomInput,
   Member,
+  MemberPresence,
   MessageInput,
   MessageListResult,
   RealtimeTicket,
@@ -49,6 +50,31 @@ export async function listMembers(
   return api<{ items: Member[] }>(
     `/v1/rooms/${roomId}/members`,
     {},
+    { token },
+  );
+}
+
+/** Online state derived from live WebSocket connections. */
+export async function listPresence(
+  token: string,
+  roomId: string,
+): Promise<{ items: MemberPresence[] }> {
+  return api<{ items: MemberPresence[] }>(
+    `/v1/rooms/${roomId}/presence`,
+    {},
+    { token },
+  );
+}
+
+/** Removes a member (owner only). The room owner cannot be removed. */
+export async function removeRoomMember(
+  token: string,
+  roomId: string,
+  memberId: string,
+): Promise<void> {
+  await api<void>(
+    `/v1/rooms/${roomId}/members/${memberId}`,
+    { method: "DELETE" },
     { token },
   );
 }

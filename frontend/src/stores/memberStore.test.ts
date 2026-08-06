@@ -58,4 +58,16 @@ describe("memberStore groups", () => {
     expect(useMemberStore.getState().groups.humans).toHaveLength(1);
     expect(useMemberStore.getState().groups.humans[0]).toBe(before.humans[0]);
   });
+
+  it("tracks presence per member and clears it on removal", () => {
+    useMemberStore.getState().setMembers([human, agent]);
+    useMemberStore.getState().setPresence(human.id, true);
+    useMemberStore.getState().setPresence(agent.id, false);
+    expect(useMemberStore.getState().onlineById[human.id]).toBe(true);
+    expect(useMemberStore.getState().onlineById[agent.id]).toBe(false);
+
+    useMemberStore.getState().removeMember(agent.id);
+    expect(useMemberStore.getState().onlineById[agent.id]).toBeUndefined();
+    expect(useMemberStore.getState().onlineById[human.id]).toBe(true);
+  });
 });

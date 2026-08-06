@@ -214,6 +214,12 @@ export interface MemberRemovedEvent {
   data: { memberId: string };
 }
 
+export interface MemberPresence {
+  memberId: string;
+  online: boolean;
+  lastSeenAt: string | null;
+}
+
 export interface MemberPresenceEvent {
   type: "member.presence";
   data: { memberId: string; online: boolean; lastSeenAt: string | null };

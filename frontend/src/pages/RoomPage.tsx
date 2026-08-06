@@ -7,6 +7,8 @@ import {
   useJoinRoom,
   useMembers,
   useMessageHistory,
+  usePresence,
+  useRemoveMember,
   useRooms,
 } from "../api/hooks";
 import { getRealtimeTicket } from "../api/rooms";
@@ -37,6 +39,7 @@ export default function RoomPage() {
   const hasOlder = useMessageStore((state) => state.hasOlder);
   const upsertMember = useMemberStore((state) => state.upsertMember);
   const removeMember = useMemberStore((state) => state.removeMember);
+  const setPresence = useMemberStore((state) => state.setPresence);
   const resetMembers = useMemberStore((state) => state.reset);
   const upsertDelivery = useDeliveryStore((state) => state.upsertDelivery);
   const resetDeliveries = useDeliveryStore((state) => state.reset);
@@ -45,6 +48,7 @@ export default function RoomPage() {
   const membership = rooms.data?.items.find(
     (item) => item.room.id === roomId,
   );
+  const myMemberId = membership?.member.id ?? "";
   const isOwner = membership?.member.role === "owner";
   const joined = Boolean(membership);
 
@@ -53,8 +57,21 @@ export default function RoomPage() {
   );
 
   useMembers(roomId);
+  usePresence(roomId);
   useMessageHistory(roomId);
   const connectorQuery = useConnector(roomId);
+  const removeMemberMutation = useRemoveMember(roomId);
+
+  const handleRemoveMember = (memberId: string) => {
+    if (
+      !window.confirm(
+        "确认移除该成员?其访问令牌将立即失效,被移除后需重新邀请才能加入。",
+      )
+    ) {
+      return;
+    }
+    removeMemberMutation.mutate(memberId);
+  };
 
   // Reset per-room state when switching rooms.
   useEffect(() => {
@@ -83,7 +100,18 @@ export default function RoomPage() {
         },
         onMessageCreated: (message) => upsertMessages([message]),
         onDeliveryUpdated: (delivery) => upsertDelivery(delivery),
-        onMemberRemoved: (memberId) => removeMember(memberId),
+        onMemberRemoved: (memberId) => {
+          if (memberId === myMemberId) {
+            // We were removed: leave the room cleanly and go back to the list.
+            resetMessages();
+            resetMembers();
+            resetDeliveries();
+            navigate("/rooms", { replace: true });
+            return;
+          }
+          removeMember(memberId);
+        },
+        onMemberPresence: (memberId, online) => setPresence(memberId, online),
       },
     });
     client.connect();
@@ -92,11 +120,17 @@ export default function RoomPage() {
     token,
     roomId,
     joined,
+    myMemberId,
     queryClient,
     upsertMessages,
     upsertMember,
     upsertDelivery,
     removeMember,
+    setPresence,
+    resetMessages,
+    resetMembers,
+    resetDeliveries,
+    navigate,
   ]);
 
   if (!token) {
@@ -204,7 +238,11 @@ export default function RoomPage() {
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto">
               {rightTab === "members" ? (
-                <MemberPanel isOwner={Boolean(isOwner)} />
+                <MemberPanel
+                  isOwner={Boolean(isOwner)}
+                  myMemberId={myMemberId}
+                  onRemoveMember={handleRemoveMember}
+                />
               ) : (
                 <ConnectPanel
                   roomId={roomId}

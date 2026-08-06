@@ -30,15 +30,19 @@ interface MemberState {
    * useSyncExternalStore).
    */
   groups: MemberGroups;
+  /** Online state keyed by member.id, driven by presence API + events. */
+  onlineById: Record<string, boolean>;
   setMembers: (members: Member[]) => void;
   upsertMember: (member: Member) => void;
   removeMember: (memberId: string) => void;
+  setPresence: (memberId: string, online: boolean) => void;
   reset: () => void;
 }
 
 export const useMemberStore = create<MemberState>()((set) => ({
   byId: {},
   groups: EMPTY_GROUPS,
+  onlineById: {},
   setMembers: (members) => {
     const byId = Object.fromEntries(members.map((m) => [m.id, m]));
     set({ byId, groups: computeGroups(byId) });
@@ -52,9 +56,16 @@ export const useMemberStore = create<MemberState>()((set) => ({
     set((state) => {
       const byId = { ...state.byId };
       delete byId[memberId];
-      return { byId, groups: computeGroups(byId) };
+      const onlineById = { ...state.onlineById };
+      delete onlineById[memberId];
+      return { byId, groups: computeGroups(byId), onlineById };
     }),
-  reset: () => set({ byId: {}, groups: EMPTY_GROUPS }),
+  setPresence: (memberId, online) =>
+    set((state) => ({
+      onlineById: { ...state.onlineById, [memberId]: online },
+    })),
+  reset: () =>
+    set({ byId: {}, groups: EMPTY_GROUPS, onlineById: {} }),
 }));
 
 /** Stable selector: the grouped view reference only changes when members change. */

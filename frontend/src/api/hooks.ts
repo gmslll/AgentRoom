@@ -7,7 +7,9 @@ import {
   joinRoom,
   listMembers,
   listMessages,
+  listPresence,
   listRooms,
+  removeRoomMember,
   rotateInvite,
   sendMessage,
 } from "./rooms";
@@ -140,6 +142,45 @@ export function useMembers(roomId: string) {
       return result.items;
     },
     enabled: Boolean(token) && Boolean(roomId),
+  });
+}
+
+/**
+ * Loads the presence snapshot (online state derived from live WebSocket
+ * connections) into the member store. Never guess online state from the
+ * member list.
+ */
+export function usePresence(roomId: string) {
+  const token = useAuthToken();
+  const setPresence = useMemberStore((state) => state.setPresence);
+  return useQuery({
+    queryKey: ["rooms", roomId, "presence"],
+    queryFn: async () => {
+      const result = await listPresence(token as string, roomId);
+      for (const item of result.items) {
+        setPresence(item.memberId, item.online);
+      }
+      return result.items;
+    },
+    enabled: Boolean(token) && Boolean(roomId),
+  });
+}
+
+/** Removes a member (owner only). The room owner cannot be removed. */
+export function useRemoveMember(roomId: string) {
+  const token = useAuthToken();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (memberId: string) =>
+      removeRoomMember(token as string, roomId, memberId),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: AUTH_KEYS.members(roomId),
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["rooms", roomId, "presence"],
+      });
+    },
   });
 }
 
