@@ -145,7 +145,7 @@ function MemberGroup({
                 </p>
               )}
             </div>
-            {member.actorType === "agent" && isOwner && onDispatchTask && (
+            {member.actorType === "agent" && onDispatchTask && (
               <button
                 type="button"
                 onClick={() => onDispatchTask(member.id)}

@@ -521,14 +521,16 @@ export class RoomService {
     member: RoomMember,
     allowAgentRelay: boolean,
   ): Promise<SendMessageResult> {
+    // Any room member (human, terminal, or owner) may trigger agents.
+    // Agent members must go through the explicit relay path so replies do
+    // not self-trigger new tasks; the UI never exposes dispatch to agents.
     const allowed =
-      member.role === "owner" ||
-      (allowAgentRelay && member.actorType === "agent");
+      member.actorType === "agent" ? allowAgentRelay : true;
     if (!allowed) {
       throw new AppError(
         403,
         "AGENT_TRIGGER_FORBIDDEN",
-        "Only the room owner can trigger agents in the MVP",
+        "Agent members can only trigger via explicit relay",
       );
     }
 

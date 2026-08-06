@@ -61,7 +61,8 @@ AgentRoom 是一个允许人类、本地终端和 AI Agent 共同参与的网页
   并免邀请码加入。加入后，消息、文件和实时连接仍然必须使用账号成员身份或成员令牌。
 - 普通 `text` 消息只进入聊天记录，绝不会自动唤醒 AI。
 - 只有明确的 `agent.task` 才会触发 AI，并且必须选择具体 agent 成员。
-- 当前只有房间 owner 可以触发 agent，避免加入房间的人随意控制别人的本地终端。
+- 任何房间成员都可以明确选择 agent 并下发 `agent.task`;AI 成员只能通过
+  显式 relay 触发,避免回复自触发。
 - 一个任务可以同时发给多个 agent；每个 agent 都有独立 delivery 和状态。
 - agent 的最终回复是普通可见消息，默认不会继续触发另一个 agent；Bridge 可以在
   回复时显式提交 `relay`，由后端创建新的 `agent.task` 完成自动交接。网页只需要像
@@ -531,7 +532,8 @@ Content-Type: application/json
 
 ### 显式触发 AI
 
-当前只有房间 owner 可以发 `agent.task`：
+任何房间成员(owner 或普通成员)都可以发 `agent.task`;AI 成员本身只能通过
+显式 relay 发起,避免回复自触发新任务:
 
 ```http
 POST /v1/rooms/{roomId}/messages

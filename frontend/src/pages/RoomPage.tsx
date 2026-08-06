@@ -226,11 +226,7 @@ export default function RoomPage() {
                     onDispatchReply={handleDispatchReply}
                   />
                 </div>
-                <TaskComposer
-                  roomId={roomId}
-                  isOwner={Boolean(isOwner)}
-                  preset={taskPreset}
-                />
+                <TaskComposer roomId={roomId} preset={taskPreset} />
               </>
             ) : (
               <div className="flex-1 overflow-y-auto">

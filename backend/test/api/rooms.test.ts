@@ -524,7 +524,7 @@ describe("agent task delivery", () => {
     expect(noLongerPending.json().items).toHaveLength(0);
   });
 
-  it("does not let an ordinary room member trigger an agent", async () => {
+  it("lets an ordinary room member trigger an agent", async () => {
     const app = await makeApp();
     const created = (
       await app.inject({
@@ -569,7 +569,8 @@ describe("agent task delivery", () => {
       },
     });
 
-    expect(response.statusCode).toBe(403);
-    expect(response.json().error.code).toBe("AGENT_TRIGGER_FORBIDDEN");
+    expect(response.statusCode).toBe(201);
+    expect(response.json().message.kind).toBe("agent.task");
+    expect(response.json().deliveries).toHaveLength(1);
   });
 });

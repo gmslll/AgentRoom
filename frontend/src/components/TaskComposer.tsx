@@ -15,7 +15,6 @@ export interface TaskComposerPreset {
 
 interface TaskComposerProps {
   roomId: string;
-  isOwner: boolean;
   /** Preset that opens dispatch mode with pre-filled text/targets. */
   preset?: TaskComposerPreset | null;
 }
@@ -27,7 +26,7 @@ const MAX_TARGETS = 10;
  * switch into task-dispatch mode and select explicit agent targets. The
  * idempotency key is generated once per dispatch and reused across retries.
  */
-export function TaskComposer({ roomId, isOwner, preset }: TaskComposerProps) {
+export function TaskComposer({ roomId, preset }: TaskComposerProps) {
   const [text, setText] = useState("");
   const [dispatchMode, setDispatchMode] = useState(false);
   const [targets, setTargets] = useState<Set<string>>(new Set());
@@ -170,7 +169,7 @@ export function TaskComposer({ roomId, isOwner, preset }: TaskComposerProps) {
           }
           className="max-h-40 min-h-[38px] flex-1 resize-y rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-muted/60 focus:border-primary focus:outline-none"
         />
-        {isOwner && !dispatchMode && (
+        {!dispatchMode && (
           <button
             type="button"
             onClick={() => setDispatchMode(true)}
