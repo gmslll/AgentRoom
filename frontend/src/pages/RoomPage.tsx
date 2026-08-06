@@ -161,15 +161,18 @@ export default function RoomPage() {
   return (
     <div className="flex h-full bg-bg">
       {/* Left rail: my rooms + account. */}
-      <aside className="glass-strong flex w-60 shrink-0 flex-col border-r border-white/5">
-        <div className="border-b border-white/5 px-4 py-3">
-          <h1 className="text-gradient text-lg font-extrabold tracking-tight">
+      <aside className="flex w-60 shrink-0 flex-col border-r border-border bg-surface/60">
+        <div className="border-b border-border px-4 py-3">
+          <p className="font-data text-[11px] uppercase tracking-[0.2em] text-muted">
+            agentroom
+          </p>
+          <h1 className="font-data text-lg font-bold tracking-tight text-text">
             AgentRoom
           </h1>
         </div>
         <nav className="flex-1 overflow-y-auto p-2">
-          <p className="px-2 pb-1 text-xs font-semibold uppercase tracking-wide text-muted">
-            我的聊天室
+          <p className="font-data px-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted">
+            ~/rooms
           </p>
           {rooms.data?.items.map(({ room }) => (
             <button
@@ -178,15 +181,15 @@ export default function RoomPage() {
               onClick={() => navigate(`/rooms/${room.id}`)}
               className={`mb-0.5 block w-full truncate rounded-md px-2 py-1.5 text-left text-sm transition-colors ${
                 room.id === roomId
-                  ? "bg-primary/15 font-medium text-text shadow-[inset_0_0_0_1px_rgba(91,140,255,0.3)]"
-                  : "text-muted hover:bg-white/5 hover:text-text"
+                  ? "border-l-2 border-primary bg-primary/10 font-medium text-text"
+                  : "border-l-2 border-transparent text-muted hover:bg-surface hover:text-text"
               }`}
             >
               {room.name}
             </button>
           ))}
         </nav>
-        <div className="border-t border-white/5 p-3 text-xs text-muted">
+        <div className="border-t border-border p-3 text-xs text-muted">
           <p className="truncate">{user?.displayName ?? user?.email ?? ""}</p>
           <button
             type="button"
@@ -204,7 +207,7 @@ export default function RoomPage() {
           <main className="flex min-w-0 flex-1 flex-col">
             {hasAgents ? (
               <>
-                <header className="flex items-center justify-between border-b border-white/5 px-4 py-2.5">
+                <header className="flex items-center justify-between border-b border-border px-4 py-2.5">
                   <h2 className="truncate text-sm font-semibold text-text">
                     {membership?.room.name}
                   </h2>
@@ -242,8 +245,8 @@ export default function RoomPage() {
           </main>
 
           {/* Right rail: members / connect. */}
-          <aside className="glass-strong flex w-72 shrink-0 flex-col border-l border-white/5">
-            <div className="flex border-b border-white/5 text-sm">
+          <aside className="flex w-72 shrink-0 flex-col border-l border-border bg-surface/60">
+            <div className="flex border-b border-border text-sm">
               {(
                 [
                   ["members", "成员"],
@@ -337,8 +340,11 @@ function JoinRoomForm({ roomId }: { roomId: string }) {
     <main className="flex flex-1 items-center justify-center">
       <form
         onSubmit={handleSubmit}
-        className="glass-strong animate-rise-in w-full max-w-sm space-y-4 rounded-2xl p-6 shadow-[0_20px_60px_rgba(0,0,0,0.5)]"
+        className="surface-panel-raised animate-rise-in w-full max-w-sm space-y-4 rounded-lg p-6"
       >
+        <p className="font-data text-[11px] uppercase tracking-[0.2em] text-muted">
+          $ agentroom join
+        </p>
         <h2 className="text-lg font-semibold text-text">通过邀请码加入房间</h2>
         <label className="block">
           <span className="mb-1 block text-xs text-muted">邀请码</span>
@@ -347,7 +353,7 @@ function JoinRoomForm({ roomId }: { roomId: string }) {
             value={inviteCode}
             onChange={(e) => setInviteCode(e.target.value)}
             placeholder="ari_xxx"
-            className="w-full rounded-md border border-border bg-black/25 px-3 py-2 text-sm text-text placeholder:text-muted/60 transition-shadow focus:border-primary/70 focus:shadow-[0_0_0_3px_rgba(91,140,255,0.15)] focus:outline-none"
+            className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-muted/60 focus:border-primary focus:outline-none"
           />
         </label>
         <label className="block">
@@ -356,14 +362,14 @@ function JoinRoomForm({ roomId }: { roomId: string }) {
             type="text"
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
-            className="w-full rounded-md border border-border bg-black/25 px-3 py-2 text-sm text-text transition-shadow focus:border-primary/70 focus:shadow-[0_0_0_3px_rgba(91,140,255,0.15)] focus:outline-none"
+            className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text focus:border-primary focus:outline-none"
           />
         </label>
         {error && <p className="text-sm text-danger">{error}</p>}
         <button
           type="submit"
           disabled={joinRoom.isPending}
-          className="press w-full rounded-md bg-gradient-to-r from-primary to-[#7c6cff] px-3 py-2 text-sm font-medium text-white shadow-[0_6px_20px_rgba(91,140,255,0.35)] transition-shadow hover:shadow-[0_8px_26px_rgba(91,140,255,0.45)] disabled:opacity-60 disabled:shadow-none"
+          className="press w-full rounded-md bg-primary px-3 py-2 text-sm font-medium text-white hover:bg-primary-hover disabled:opacity-60"
         >
           {joinRoom.isPending ? "加入中…" : "加入房间"}
         </button>

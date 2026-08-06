@@ -80,15 +80,18 @@ export default function LoginPage() {
 
   return (
     <div className="flex min-h-full items-center justify-center bg-bg p-4">
-      <div className="glass-strong animate-rise-in w-full max-w-sm rounded-2xl p-6 shadow-[0_20px_60px_rgba(0,0,0,0.5)]">
-        <h1 className="text-gradient mb-1 text-3xl font-extrabold tracking-tight">
+      <div className="surface-panel-raised animate-rise-in w-full max-w-sm rounded-lg p-6">
+        <p className="font-data mb-1 text-[11px] uppercase tracking-[0.2em] text-muted">
+          $ agentroom --join
+        </p>
+        <h1 className="font-data mb-1 text-2xl font-bold tracking-tight text-text">
           AgentRoom
         </h1>
         <p className="mb-5 text-sm text-muted">
           与本地终端和 AI Agent 共享的聊天室
         </p>
 
-        <div className="glass mb-5 flex rounded-lg p-0.5 text-sm">
+        <div className="mb-5 flex rounded-lg border border-border bg-bg p-0.5 text-sm">
           {(["login", "register"] as const).map((m) => (
             <button
               key={m}
@@ -96,7 +99,7 @@ export default function LoginPage() {
               onClick={() => switchMode(m)}
               className={`press flex-1 rounded-md px-3 py-1.5 transition-colors ${
                 mode === m
-                  ? "bg-surface-raised/80 font-medium text-text shadow-[0_0_12px_rgba(91,140,255,0.15)]"
+                  ? "bg-surface-raised font-medium text-text"
                   : "text-muted hover:text-text"
               }`}
             >
@@ -143,7 +146,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={mutation.isPending}
-            className="press w-full rounded-lg bg-gradient-to-r from-primary to-[#7c6cff] px-3 py-2 font-medium text-white shadow-[0_6px_20px_rgba(91,140,255,0.35)] transition-shadow hover:shadow-[0_8px_26px_rgba(91,140,255,0.45)] disabled:opacity-60 disabled:shadow-none"
+            className="press w-full rounded-md bg-primary px-3 py-2 font-medium text-white hover:bg-primary-hover disabled:opacity-60"
           >
             {mutation.isPending
               ? "提交中…"
@@ -158,7 +161,7 @@ export default function LoginPage() {
 }
 
 const inputClass =
-  "w-full rounded-md border border-border bg-black/25 px-3 py-2 text-sm text-text placeholder:text-muted/60 transition-shadow focus:border-primary/70 focus:shadow-[0_0_0_3px_rgba(91,140,255,0.15)] focus:outline-none";
+  "w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-muted/60 focus:border-primary focus:outline-none";
 
 function Field({
   label,

@@ -41,7 +41,7 @@ export function MessageList({
               type="button"
               onClick={onLoadOlder}
               disabled={loadingOlder}
-              className="rounded-md border border-border px-3 py-1 text-xs text-muted transition-colors hover:border-border-strong hover:text-text disabled:opacity-50"
+              className="press rounded-md border border-border bg-surface px-3 py-1 text-[11px] text-muted hover:border-border-strong hover:text-text disabled:opacity-50"
             >
               {loadingOlder ? "加载中…" : "加载更早的消息"}
             </button>

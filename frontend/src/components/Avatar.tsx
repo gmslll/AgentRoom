@@ -1,13 +1,10 @@
 import type { ActorType } from "../api/types";
 import { providerLabel } from "../lib/provider";
 
-const COLORS: Record<ActorType, string> = {
-  human:
-    "bg-human/15 text-human border-human/40 glow-human",
-  agent:
-    "bg-agent/15 text-agent border-agent/40 glow-agent",
-  terminal:
-    "bg-terminal/15 text-terminal border-terminal/40 glow-terminal",
+const RING: Record<ActorType, string> = {
+  human: "border-human/60 text-human bg-human/10",
+  agent: "border-agent/60 text-agent bg-agent/10",
+  terminal: "border-terminal/60 text-terminal bg-terminal/10",
 };
 
 interface AvatarProps {
@@ -17,7 +14,7 @@ interface AvatarProps {
   size?: "sm" | "md";
 }
 
-/** Round initial badge colored by participant type. */
+/** Round initial badge with a semantic-color ring; no glow. */
 export function Avatar({
   displayName,
   actorType,
@@ -25,14 +22,14 @@ export function Avatar({
   size = "md",
 }: AvatarProps) {
   const initial = (displayName.trim()[0] ?? "?").toUpperCase();
-  const dims = size === "sm" ? "size-6 text-xs" : "size-8 text-sm";
+  const dims = size === "sm" ? "size-6 text-[11px]" : "size-8 text-sm";
   const badge =
     actorType === "agent" && agentProvider
       ? providerLabel(agentProvider).slice(0, 1).toUpperCase()
       : initial;
   return (
     <div
-      className={`inline-flex shrink-0 items-center justify-center rounded-full border font-semibold transition-transform duration-150 ${dims} ${COLORS[actorType]}`}
+      className={`inline-flex shrink-0 items-center justify-center rounded-full border font-semibold ${dims} ${RING[actorType]}`}
       title={`${displayName} (${actorType})`}
     >
       {badge}

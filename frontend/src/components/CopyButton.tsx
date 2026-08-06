@@ -34,9 +34,7 @@ export function CopyButton({
       type="button"
       onClick={handleCopy}
       className={`press inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs transition-colors hover:border-border-strong hover:bg-surface-raised ${
-        copied
-          ? "border-terminal/50 text-terminal shadow-[0_0_12px_rgba(52,211,153,0.35)]"
-          : "text-muted"
+        copied ? "border-terminal/60 text-terminal" : "text-muted"
       } ${className ?? ""}`}
     >
       {copied ? "已复制" : label}

@@ -85,7 +85,7 @@ function MemberGroup({
   if (members.length === 0) return null;
   return (
     <div>
-      <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted">
+      <h4 className="font-data mb-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted">
         {title}
       </h4>
       <ul className="space-y-1">
@@ -111,13 +111,13 @@ function MemberGroup({
                   <span className="truncate">{member.displayName}</span>
                   {onlineById[member.id] && (
                     <span
-                      className="glow-terminal inline-block size-1.5 shrink-0 animate-glow-pulse rounded-full bg-terminal"
+                      className="inline-block size-1.5 shrink-0 rounded-full bg-terminal"
                       title="在线"
                     />
                   )}
                 </p>
                 {member.actorType === "agent" && (
-                  <p className="text-[10px] uppercase tracking-wide text-agent drop-shadow-[0_0_6px_rgba(167,139,250,0.5)]">
+                  <p className="font-data text-[10px] uppercase tracking-[0.14em] text-agent">
                     {providerLabel(member.agentProvider)}
                   </p>
                 )}

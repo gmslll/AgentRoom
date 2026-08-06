@@ -1,14 +1,18 @@
 import type { DeliveryStatus } from "../api/types";
 
-const STYLE: Record<DeliveryStatus, string> = {
-  queued: "text-muted border-border bg-white/[0.02]",
-  received: "text-primary border-primary/40 bg-primary/[0.06]",
-  running:
-    "text-warning border-warning/40 bg-[linear-gradient(90deg,rgba(251,191,36,0.05),rgba(251,191,36,0.16),rgba(251,191,36,0.05))] bg-[length:200%_100%] animate-flow-x",
-  replied:
-    "text-terminal border-terminal/50 bg-terminal/[0.07] shadow-[0_0_12px_rgba(52,211,153,0.25)]",
-  failed:
-    "text-danger border-danger/50 bg-danger/[0.07] shadow-[0_0_12px_rgba(248,113,113,0.2)]",
+/**
+ * Terminal-log delivery states: mono label + status glyph.
+ * received means "delivered to the terminal", not "AI read".
+ */
+const META: Record<
+  DeliveryStatus,
+  { glyph: string; className: string; title: string }
+> = {
+  queued: { glyph: "●", className: "text-muted", title: "等待终端" },
+  received: { glyph: "◐", className: "text-primary", title: "已送达终端" },
+  running: { glyph: "◉", className: "text-warning", title: "AI 处理中" },
+  replied: { glyph: "✓", className: "text-terminal", title: "已回复" },
+  failed: { glyph: "✕", className: "text-danger", title: "执行失败" },
 };
 
 const LABEL: Record<DeliveryStatus, string> = {
@@ -24,19 +28,20 @@ interface DeliveryStatusBadgeProps {
   error?: string | null;
 }
 
-/** Compact status pill for one AI delivery. */
+/** Compact terminal-style status pill for one AI delivery. */
 export function DeliveryStatusBadge({
   status,
   error,
 }: DeliveryStatusBadgeProps) {
+  const meta = META[status];
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs ${STYLE[status]}`}
-      title={error ?? undefined}
+      className={`font-data inline-flex items-center gap-1.5 text-[11px] uppercase tracking-wide ${meta.className}`}
+      title={error ?? meta.title}
     >
-      {status === "running" && (
-        <span className="inline-block size-2 animate-pulse rounded-full bg-warning" />
-      )}
+      <span className={status === "running" ? "animate-spin-fast inline-block" : "inline-block"}>
+        {meta.glyph}
+      </span>
       {LABEL[status]}
     </span>
   );

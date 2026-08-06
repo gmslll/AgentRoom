@@ -138,7 +138,7 @@ export function TaskComposer({ roomId, isOwner, preset }: TaskComposerProps) {
                     onClick={() => toggleTarget(agent.id)}
                     className={`press rounded-full border px-2.5 py-1 text-xs transition-colors ${
                       active
-                        ? "glow-agent border-agent bg-agent/15 text-agent"
+                        ? "border-agent bg-agent/15 text-agent"
                         : "border-border text-muted hover:border-agent/40 hover:text-text"
                     }`}
                   >
@@ -168,14 +168,14 @@ export function TaskComposer({ roomId, isOwner, preset }: TaskComposerProps) {
               ? "描述要 AI 执行的任务…(Enter 发送)"
               : "发送消息…(Enter 发送,Shift+Enter 换行)"
           }
-          className="max-h-40 min-h-[38px] flex-1 resize-y rounded-lg border border-border bg-black/25 px-3 py-2 text-sm text-text placeholder:text-muted/60 transition-shadow focus:border-primary/70 focus:shadow-[0_0_0_3px_rgba(91,140,255,0.15)] focus:outline-none"
+          className="max-h-40 min-h-[38px] flex-1 resize-y rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text placeholder:text-muted/60 focus:border-primary focus:outline-none"
         />
         {isOwner && !dispatchMode && (
           <button
             type="button"
             onClick={() => setDispatchMode(true)}
             disabled={agents.length === 0}
-            className="press rounded-lg border border-agent/40 bg-agent/[0.06] px-3 py-2 text-sm text-agent shadow-[0_0_14px_rgba(167,139,250,0.15)] transition-colors hover:border-agent/70 hover:bg-agent/10 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
+            className="press rounded-lg border border-agent/50 bg-agent/10 px-3 py-2 text-sm text-agent hover:bg-agent/15 disabled:cursor-not-allowed disabled:opacity-50"
             title={
               agents.length === 0
                 ? "先接入 Agent 成员"
@@ -189,7 +189,7 @@ export function TaskComposer({ roomId, isOwner, preset }: TaskComposerProps) {
           type="button"
           onClick={() => (dispatchMode ? void handleDispatch() : void handleSendText())}
           disabled={dispatchMode ? !canDispatch : !canSendText}
-          className={`press rounded-lg bg-gradient-to-r from-primary to-[#7c6cff] px-4 py-2 text-sm font-medium text-white shadow-[0_4px_16px_rgba(91,140,255,0.35)] transition-shadow hover:shadow-[0_6px_22px_rgba(91,140,255,0.45)] disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none ${
+          className={`press rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50 ${
             pending ? "animate-pulse" : ""
           }`}
         >
