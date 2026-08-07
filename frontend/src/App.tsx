@@ -1,8 +1,9 @@
 import { useEffect } from "react";
-import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
+import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { getMe } from "./api/auth";
 import { useCurrentUser } from "./api/hooks";
 import { ToastHost } from "./components/ToastHost";
+import { features } from "./config/features";
 import LoginPage from "./pages/LoginPage";
 import AccountPage from "./pages/AccountPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
@@ -26,6 +27,7 @@ export default function App() {
   return (
     <>
       <OAuthSessionCapture />
+      <EmailVerificationBanner />
       <Routes>
         <Route path="/" element={<RootRedirect />} />
         <Route path="/login" element={<LoginPage />} />
@@ -41,8 +43,33 @@ export default function App() {
   );
 }
 
-function OAuthSessionCapture() {
-  const navigate = useNavigate();
+/**
+ * Global reminder when email auth is on but the account is unverified.
+ * Hidden on the login/auth flows and on the account page itself.
+ */
+function EmailVerificationBanner() {
+  const user = useTokenStore((state) => state.user);
+  const { pathname } = useLocation();
+  const show =
+    features.emailAuth &&
+    Boolean(user) &&
+    !user?.emailVerifiedAt &&
+    !pathname.startsWith("/login") &&
+    !pathname.startsWith("/account") &&
+    !pathname.startsWith("/forgot") &&
+    !pathname.startsWith("/reset");
+  if (!show) return null;
+  return (
+    <div className="flex items-center justify-center gap-2 border-b border-warning/30 bg-warning/10 px-4 py-1.5 text-xs text-warning">
+      <span>邮箱尚未验证,部分功能可能受限。</span>
+      <Link to="/account" className="font-medium underline underline-offset-2 hover:text-text">
+        前往验证
+      </Link>
+    </div>
+  );
+}
+
+function OAuthSessionCapture() {  const navigate = useNavigate();
   const setSession = useTokenStore((state) => state.setSession);
   const pushToast = useToastStore((state) => state.push);
 
