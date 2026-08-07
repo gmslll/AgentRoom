@@ -40,7 +40,9 @@
   `beforeSequence` 契约后再支持(规格 §11 已注明)。
 - **功能开关默认全关**:本地 `.env` 未设 `VITE_ENABLE_*`,邮箱验证/忘记密码/
   OAuth/审核 UI 默认隐藏。需按部署目标启用(注意后端能力匹配)。
-- **接入引导空态**:无 agent 时中栏直接渲染 ConnectPanel,可再打磨。
+- **后端邮箱验证 500**(后端侧):`POST /v1/auth/email/verification` 在本地
+  dev server 返回 500(tsx 直连 app 正常,疑与 dev server 运行环境有关);
+  前端调用已就绪,待后端排查。
 
 ## 明确不做(规格 §14,MVP 范围外)
 
@@ -51,7 +53,7 @@
 ```powershell
 cd frontend
 npm run dev        # http://localhost:4000(需后端 8787 已启动)
-npm test           # Vitest(23 测试)
+npm test           # Vitest(25 测试)
 npm run build      # 生产构建
 ```
 
