@@ -10,6 +10,7 @@ import type { OAuthProvider } from "../api/types";
 import { AuthShell } from "../components/auth/AuthShell";
 import { Icon } from "../components/ui/Icon";
 import { features } from "../config/features";
+import { useToastStore } from "../stores/toastStore";
 import { useTokenStore } from "../stores/tokenStore";
 
 const loginSchema = z.object({
@@ -58,6 +59,14 @@ export default function LoginPage() {
     try {
       if (isRegister) {
         await registerMutation.mutateAsync(values);
+        if (features.emailAuth) {
+          useToastStore
+            .getState()
+            .push(
+              "账号已创建。验证码已发送,请到「账号设置」完成邮箱验证。",
+              "info",
+            );
+        }
       } else {
         await loginMutation.mutateAsync({
           email: values.email,

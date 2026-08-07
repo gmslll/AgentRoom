@@ -1,59 +1,61 @@
 # Frontend progress
 
-> 最后更新：2026-08-07（release-v0.7.0）。当前实现以
-> [`../docs/superpowers/specs/2026-08-06-frontend-signal-operations-design.md`](../docs/superpowers/specs/2026-08-06-frontend-signal-operations-design.md)
-> 为视觉与交互基线，以 `shared/contracts/` 为协议基线。
+> 记录前端实现进度。最后更新:2026-08-07(协作者完成 Signal 重构后同步)。
 
-## 已完成
+设计基线:`docs/superpowers/specs/2026-08-05-frontend-design.md`。
+协议基线:`shared/contracts/http/openapi.yaml` + `shared/contracts/realtime/event.schema.json`。
 
-| 模块 | 状态 | 当前实现 |
-| --- | --- | --- |
-| 视觉系统 | ✅ | Signal Operations 深色工业协作台；Archivo Variable + JetBrains Mono；signal/human/agent/terminal 语义色；切角、信号轨、骨白交付纸；reduced-motion |
-| 响应式壳层 | ✅ | 桌面房间导航 + 消息工作区 + 控制 dock；平板/手机使用左右抽屉和底部房间工具栏 |
-| 账号 | ✅ | 登录、注册、会话恢复、登出、邮箱验证、忘记/重置/修改密码、Google/GitHub OAuth hash 接收；邮件和 OAuth 入口由构建开关控制 |
-| 房间总览 | ✅ | 创建私有/公开房间、我的房间、公开发现与直接加入；创建响应的一次性邀请码带入接入面板后立即从浏览器历史清除 |
-| 房间治理 | ✅ | 改名、公开性、解散、踢人、审核规则；owner-only 操作只进入设置/成员 dock |
-| 消息与实时 | ✅ | 三类消息、历史去重、WebSocket 票据/心跳/重连、header 连接状态、presence 快照与实时事件、被踢/解散自动退出 |
-| Agent 派发 | ✅ | 普通消息与定向任务模式分离；结构化 `@Agent` 选择只展示 `agent-access.canDispatch=true`；多目标、幂等键、delivery 五状态、继续派发 |
-| Agent 权限 | ✅ | 一次性 claim code 领取、用户授权/撤销、跨所有者 Agent 协作申请/接受/拒绝/撤销；不再把 room owner 当作 Agent 所有者 |
-| 文件附件 | ✅ | intent → PUT → complete；普通消息和 Agent task 可带附件；历史只保留 ID，进入视口才按 ID 获取短期下载 URL；房间级台账需 owner 主动打开 |
-| 本地接入 | ✅ | macOS/Linux、PowerShell、CMD 安装；新会话与已有会话；邀请码旋转；公开房；已有 AI 一句话自检安装并 `attach --session last --no-launch` |
-| 质量门 | ✅ | `lint`、`typecheck`、`test`、`build` 通过；23 个测试覆盖权限过滤、附件懒加载、自助接入、实时连接、store、delivery 与安装命令 |
+## 现状(2026-08-07)
 
-## 构建开关
+协作者已完成 **Signal Operations 重构**(`2d86112`):前端重建为信号控制台风格,
+新增 AppShell/AuthShell/BrandMark/Icon/PageState 等 UI 基座、账号页、忘记/重置
+密码页、Agent 授权协作、附件按需加载、self-onboarding。经全量审计(与
+`docs/frontend-change-checklist.md` 逐项核对),以下能力**全部已对接**:
 
-```dotenv
-VITE_API_BASE_URL=http://127.0.0.1:8787
-VITE_ENABLE_EMAIL_AUTH=false
-VITE_ENABLE_GOOGLE_OAUTH=false
-VITE_ENABLE_GITHUB_OAUTH=false
-VITE_ENABLE_MODERATION=false
+| 能力 | 入口 |
+| --- | --- |
+| 邮箱验证 | `AccountPage` EmailVerification(`features.emailAuth` 开关) |
+| 忘记/重置密码 | `ForgotPasswordPage` / `ResetPasswordPage` |
+| 修改密码 | `AccountPage` PasswordPanel |
+| OAuth(Google/GitHub) | `LoginPage` OAuthButton + `App` OAuthSessionCapture(fragment 回调) |
+| 审核规则 | `RoomSettingsPanel` ModerationManager;消息 moderation 状态在 MessageBubble 展示 |
+| 附件 | TaskComposer AttachmentPicker(上传≤10);RoomSettingsPanel 附件台账(懒加载);AttachmentStrip 进视口按需下载(IntersectionObserver);agent.task 携带 attachmentIds |
+| Agent 领取/授权/协作 | `AgentAccessPanel`(RoomPage「授权」tab):claim code、grant/revoke、collaboration 申请/接受/拒绝/撤销 |
+| @Agent 派发选择器 | TaskComposer 目标多选 + MemberPanel 每行派发,均按 `useAgentAccess` canDispatch 过滤;全员可派发 |
+| self-onboarding | ConnectPanel「让当前 AI 自己接入」(`lib/self-onboarding.ts`),私有房间需先生成邀请码 |
+| 功能开关 | `config/features.ts` 读 `VITE_ENABLE_*`;emailAuth/googleOAuth/githubOAuth/moderation 均在实际 UI 生效 |
+| 路由 | `/` `/login` `/forgot-password` `/reset-password` `/account` `/rooms` `/rooms/:roomId` |
+
+## 本轮已处理(2026-08-07)
+
+- 安装缺失依赖 `@fontsource-variable/archivo`(typecheck 失败修复)。
+- `PasswordPanel` 对齐开关:仅 `features.emailAuth` 时显示(修复不一致)。
+- 注册成功后如开启 emailAuth,toast 引导去「账号设置」完成邮箱验证。
+- `.env.example` 补功能开关说明(每个开关需对应后端能力,否则 UI 入口会运行时报错)。
+- 滚动条细化 + 全员可派发任务(此前轮次)。
+
+## 已知占位 / 待办 🔶
+
+- **历史超上限**:初始加载上限 20 页(1000 条);超长房间需后端增加
+  `beforeSequence` 契约后再支持(规格 §11 已注明)。
+- **功能开关默认全关**:本地 `.env` 未设 `VITE_ENABLE_*`,邮箱验证/忘记密码/
+  OAuth/审核 UI 默认隐藏。需按部署目标启用(注意后端能力匹配)。
+- **接入引导空态**:无 agent 时中栏直接渲染 ConnectPanel,可再打磨。
+
+## 明确不做(规格 §14,MVP 范围外)
+
+文件上传之外的附加能力按契约演进;AI 间自动接力走 relay 契约。
+
+## 运行
+
+```powershell
+cd frontend
+npm run dev        # http://localhost:4000(需后端 8787 已启动)
+npm test           # Vitest(23 测试)
+npm run build      # 生产构建
 ```
 
-生产服务器当前确认 `FILES_ENABLED=true`；邮件投递、OAuth 和审核没有生产配置，因此
-release 构建暂不显示对应入口。代码已经完整接线，配置就绪后在构建环境启用，不通过
-404 猜测能力。
-
-## 已知边界
-
-- 历史接口只有 `afterSequence`。前端从 0 正序遍历，最多加载 20 × 50 条；要正确处理
-  超过 1000 条的超长房间，需要后端补 `beforeSequence` 或尾页游标协议。
-- 当前执行环境没有可连接的浏览器实例，本轮已完成代码、响应式规则、构建和 jsdom
-  交互验证，但 360/768/1280/1536 的截图级浏览器验收仍需在浏览器可用时补做。
-- Bridge 专用 pending/status/reply 和 `/mcp` 不属于网页能力；网页只展示后端产生的
-  task、reply 和 delivery 事件。
-
-## 本地运行
-
-```bash
-cd backend
-CORS_ORIGIN=http://127.0.0.1:4000 npm run dev
-
-cd ../frontend
-cp .env.example .env
-npm run dev                 # http://127.0.0.1:4000
-npm run lint
-npm run typecheck
-npm test
-npm run build
-```
+- 本地联调:`.env` → `VITE_API_BASE_URL=http://127.0.0.1:8787`(已被 git 忽略)。
+- 后端 CORS:用 `CORS_ORIGIN=http://localhost:4000` 显式传环境变量启动
+  (后端当前不读取 `.env` 文件)。
+- 后端内存模式即可演示;重启后数据清空。

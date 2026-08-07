@@ -53,7 +53,7 @@ export default function AccountPage() {
           )}
         </section>
 
-        <PasswordPanel />
+        {features.emailAuth && <PasswordPanel />}
       </div>
     </AppShell>
   );
